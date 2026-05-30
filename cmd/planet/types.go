@@ -75,3 +75,21 @@ type PlanetResponse struct {
 	Storage    Storage      `json:"storage"`
 	Queue      []QueueEntry `json:"queue"`
 }
+
+type Galaxy struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type System struct {
+	ID            int `json:"id"`
+	SystemNum     int `json:"system_num"`
+	OccupiedCount int `json:"occupied_count"`
+}
+
+type Position struct {
+	PositionNum int    `json:"position"`
+	State       string `json:"state"`
+	PlanetName  string `json:"planet_name,omitempty"`
+	PlayerID    int    `json:"player_id,omitempty"`
+}
