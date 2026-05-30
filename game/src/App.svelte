@@ -60,6 +60,22 @@
   $: if (token && !user) startPolling()
   $: if (!token) stopPolling()
 
+  function planetTypeLabel(type) {
+    const labels = {
+      terran: 'Terran', desert: 'Desert', ice: 'Ice',
+      volcanic: 'Volcanic', gas_giant: 'Gas Giant',
+    }
+    return labels[type] || type
+  }
+
+  function planetTypeIcon(type) {
+    const icons = {
+      terran: '🌍', desert: '🏜️', ice: '❄️',
+      volcanic: '🌋', gas_giant: '🪐',
+    }
+    return icons[type] || '🌍'
+  }
+
   function buildingLabel(type) {
     const labels = {
       metal_mine: 'Metal Mine', crystal_mine: 'Crystal Mine',
@@ -163,6 +179,10 @@
       {#if planet}
         <h1 class="name">{planet.name}</h1>
         <p class="coords">[{planet.galaxy}:{planet.system}:{planet.position}]</p>
+        <p class="planet-meta">
+          <span class="type-badge type-{planet.type}">{planetTypeIcon(planet.type)} {planetTypeLabel(planet.type)}</span>
+          <span class="temperature">{planet.temperature}°C</span>
+        </p>
         <p class="fields">Fields: {planet.fields_used}/{planet.max_fields}</p>
 
         <div class="resources">
@@ -332,6 +352,21 @@
   .logout:hover { background: #3a2020; }
   .name { font-size: 1.5rem; color: #e8eef5; margin-bottom: 0.25rem; }
   .coords { font-family: monospace; font-size: 0.75rem; color: #3a5a8a; margin-bottom: 0.25rem; }
+  .planet-meta {
+    display: flex; justify-content: center; align-items: center; gap: 0.75rem;
+    margin-bottom: 1.5rem; font-size: 0.85rem;
+  }
+  .type-badge {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem;
+    border: 1px solid;
+  }
+  .type-terran { background: #1a2a1a; border-color: #2a4a2a; color: #8ac88a; }
+  .type-desert { background: #2a1a0a; border-color: #4a3a1a; color: #d4a574; }
+  .type-ice { background: #0a1a2a; border-color: #1a3a5a; color: #74a8d4; }
+  .type-volcanic { background: #2a0a0a; border-color: #5a1a1a; color: #d47474; }
+  .type-gas_giant { background: #1a0a2a; border-color: #3a1a5a; color: #a874d4; }
+  .temperature { font-family: monospace; color: #5a7a9a; font-size: 0.8rem; }
   .fields { font-size: 0.75rem; color: #6a8a6a; margin-bottom: 1.5rem; }
 
   .resources { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
