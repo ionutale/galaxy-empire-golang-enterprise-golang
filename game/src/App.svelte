@@ -67,6 +67,7 @@
       metal_storage: 'Metal Storage', crystal_storage: 'Crystal Storage',
       gas_storage: 'Gas Storage',
       robotics_factory: 'Robotics Facility', nanite_factory: 'Nanite Factory',
+      terraformer: 'Terraformer',
     }
     return labels[type] || type
   }
@@ -83,6 +84,7 @@
       case 'gas_storage': return { metal: Math.floor(1000 * Math.pow(2, next)), crystal: 0, gas: 0 }
       case 'robotics_factory': return { metal: Math.floor(400 * Math.pow(2, next)), crystal: Math.floor(120 * Math.pow(2, next)), gas: Math.floor(200 * Math.pow(2, next)) }
       case 'nanite_factory': return { metal: Math.floor(1000000 * Math.pow(2, next)), crystal: Math.floor(500000 * Math.pow(2, next)), gas: Math.floor(100000 * Math.pow(2, next)) }
+      case 'terraformer': return { metal: Math.floor(50000 * Math.pow(2, next)), crystal: Math.floor(50000 * Math.pow(2, next)), gas: Math.floor(50000 * Math.pow(2, next)) }
     }
     return { metal: 0, crystal: 0, gas: 0 }
   }
@@ -118,6 +120,36 @@
       await loadPlanet()
     } catch (e) { error = e.message }
   }
+
+  async function cancelUpgrade(buildingType) {
+    try {
+      const res = await fetch(`/api/buildings/${buildingType}/cancel`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        error = data.error || 'Cancel failed'
+        return
+      }
+      await loadPlanet()
+    } catch (e) { error = e.message }
+  }
+
+  async function startDeconstruct(type) {
+    try {
+      const res = await fetch(`/api/buildings/${type}/deconstruct`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        error = data.error || 'Deconstruct failed'
+        return
+      }
+      await loadPlanet()
+    } catch (e) { error = e.message }
+  }
 </script>
 
 <div class="app">
@@ -131,6 +163,7 @@
       {#if planet}
         <h1 class="name">{planet.name}</h1>
         <p class="coords">[{planet.galaxy}:{planet.system}:{planet.position}]</p>
+        <p class="fields">Fields: {planet.fields_used}/{planet.max_fields}</p>
 
         <div class="resources">
           <div class="res metal">
@@ -173,8 +206,15 @@
             {#each planet.queue as entry}
               <div class="queue-item">
                 <span class="qname">{buildingLabel(entry.building_type)}</span>
-                <span class="qlevel">Lv.{entry.target_level}</span>
+                <span class="qlevel">
+                  {#if entry.status === 'deconstruct'}
+                    Deconstruct
+                  {:else}
+                    Lv.{entry.target_level}
+                  {/if}
+                </span>
                 <span class="qtime">{(new Date(entry.completes_at) - new Date()) / 1000 > 0 ? Math.ceil((new Date(entry.completes_at) - new Date()) / 1000) + 's' : 'Complete'}</span>
+                <button class="btn-cancel-queue" on:click={() => cancelUpgrade(entry.building_type)}>Cancel</button>
               </div>
             {/each}
           </div>
@@ -215,6 +255,7 @@
                   </div>
                 {:else if !isQueued(building.type)}
                   <button class="btn-upgrade" on:click={() => toggleUpgrade(building)}>+</button>
+                  <button class="btn-deconstruct" on:click={() => startDeconstruct(building.type)}>−</button>
                 {:else}
                   <span class="q-badge">Build</span>
                 {/if}
@@ -290,7 +331,8 @@
   }
   .logout:hover { background: #3a2020; }
   .name { font-size: 1.5rem; color: #e8eef5; margin-bottom: 0.25rem; }
-  .coords { font-family: monospace; font-size: 0.75rem; color: #3a5a8a; margin-bottom: 1.5rem; }
+  .coords { font-family: monospace; font-size: 0.75rem; color: #3a5a8a; margin-bottom: 0.25rem; }
+  .fields { font-size: 0.75rem; color: #6a8a6a; margin-bottom: 1.5rem; }
 
   .resources { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
   .res {
@@ -377,4 +419,15 @@
     border-radius: 4px; color: #d47474; font-size: 0.75rem; cursor: pointer;
   }
   .btn-cancel:hover { background: #5a3030; }
+  .btn-cancel-queue {
+    padding: 0.2rem 0.4rem; background: #4a2020; border: 1px solid #6a3030;
+    border-radius: 4px; color: #d47474; font-size: 0.65rem; cursor: pointer; margin-left: 0.5rem;
+  }
+  .btn-cancel-queue:hover { background: #5a3030; }
+  .btn-deconstruct {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #4a2a2a; border: 1px solid #6a3a3a;
+    color: #d47474; font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .btn-deconstruct:hover { background: #5a3a3a; }
 </style>
