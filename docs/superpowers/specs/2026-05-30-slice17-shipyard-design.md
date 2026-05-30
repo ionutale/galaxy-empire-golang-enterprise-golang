@@ -10,6 +10,8 @@ All in existing `cmd/planet` service — no new microservice. Ship types defined
 
 ## Schema
 
+Add `shipyard` to the existing building seed (level 1 for all planets).
+
 New migration adds one table:
 
 ```sql
