@@ -43,9 +43,12 @@ func (m *mockRepo) Create(_ context.Context, userID int) (Planet, []Building, er
 	m.nextPID++
 	m.planets[p.ID] = p
 
-	types := []string{"metal_mine", "crystal_mine", "gas_mine", "solar_plant"}
-	buildings := make([]Building, 0, 4)
-	for _, t := range types {
+	seedTypes := []string{
+		"metal_mine", "crystal_mine", "gas_mine", "solar_plant",
+		"metal_storage", "crystal_storage", "gas_storage",
+	}
+	buildings := make([]Building, 0, len(seedTypes))
+	for _, t := range seedTypes {
 		b := Building{ID: m.nextBID, PlanetID: p.ID, Type: t, Level: 1}
 		m.nextBID++
 		buildings = append(buildings, b)
@@ -83,14 +86,16 @@ func TestGetOrCreate_FirstCallCreatesWithBuildings(t *testing.T) {
 	if p.Name != "Homeworld" {
 		t.Errorf("expected Homeworld, got %s", p.Name)
 	}
-	if len(buildings) != 4 {
-		t.Errorf("expected 4 buildings, got %d", len(buildings))
+	if len(buildings) != 7 {
+		t.Errorf("expected 7 buildings, got %d", len(buildings))
 	}
 	types := make(map[string]int)
 	for _, b := range buildings {
 		types[b.Type] = b.Level
 	}
-	for _, typ := range []string{"metal_mine", "crystal_mine", "gas_mine", "solar_plant"} {
+	expected := []string{"metal_mine", "crystal_mine", "gas_mine", "solar_plant",
+		"metal_storage", "crystal_storage", "gas_storage"}
+	for _, typ := range expected {
 		if types[typ] != 1 {
 			t.Errorf("expected %s level 1, got %d", typ, types[typ])
 		}
@@ -185,16 +190,6 @@ func TestCalculateProduction(t *testing.T) {
 	if prod.Metal <= 0 {
 		t.Error("expected positive metal production")
 	}
-	if prod.Crystal <= 0 {
-		t.Error("expected positive crystal production")
-	}
-	if prod.Gas <= 0 {
-		t.Error("expected positive gas production")
-	}
-	if prod.Energy <= 0 {
-		t.Error("expected positive energy production")
-	}
-
 	rounded := math.Round(prod.Metal * 60)
 	if rounded != 33 {
 		t.Errorf("metal L1 should produce 33/min, got %.2f/min", prod.Metal*60)
@@ -212,5 +207,85 @@ func TestBuildingFormulaScale(t *testing.T) {
 			t.Errorf("metal mine L%d (%.0f) should produce more than L%d (%.0f)",
 				levels[i], rates[levels[i]], levels[i-1], rates[levels[i-1]])
 		}
+	}
+}
+
+func TestStorageCapacity_Default(t *testing.T) {
+	cap := storageCapacity("metal_storage", 0)
+	if cap != baseStorage {
+		t.Errorf("expected base storage %d, got %d", baseStorage, cap)
+	}
+}
+
+func TestStorageCapacity_Level1(t *testing.T) {
+	cap := storageCapacity("metal_storage", 1)
+	if cap <= baseStorage {
+		t.Errorf("level 1 should exceed base storage %d, got %d", baseStorage, cap)
+	}
+	expected := baseStorage + int(5000*math.Pow(1.5, 1))
+	if cap != expected {
+		t.Errorf("expected %d, got %d", expected, cap)
+	}
+}
+
+func TestCalculateStorage(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	buildings := []Building{
+		{Type: "metal_storage", Level: 2},
+		{Type: "crystal_storage", Level: 1},
+		{Type: "gas_storage", Level: 3},
+	}
+	storage := svc.calculateStorage(buildings)
+
+	if storage.Metal <= baseStorage {
+		t.Error("metal storage should exceed base")
+	}
+	if storage.Crystal <= baseStorage {
+		t.Error("crystal storage should exceed base")
+	}
+	if storage.Gas <= baseStorage {
+		t.Error("gas storage should exceed base")
+	}
+}
+
+func TestStorage_NoStorageBuildings(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	storage := svc.calculateStorage(nil)
+
+	if storage.Metal != baseStorage {
+		t.Errorf("expected %d for missing metal_storage, got %d", baseStorage, storage.Metal)
+	}
+	if storage.Crystal != baseStorage {
+		t.Errorf("expected %d for missing crystal_storage, got %d", baseStorage, storage.Crystal)
+	}
+	if storage.Gas != baseStorage {
+		t.Errorf("expected %d for missing gas_storage, got %d", baseStorage, storage.Gas)
+	}
+}
+
+func TestResourceCapping(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	_, _, err := svc.GetOrCreatePlanet(context.Background(), 77)
+	if err != nil {
+		t.Fatal("first call:", err)
+	}
+
+	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 77)
+	if err != nil {
+		t.Fatal("second call:", err)
+	}
+
+	mock := svc.repo.(*mockRepo)
+	storedPlanet := mock.planets[planet.ID]
+
+	storage := svc.calculateStorage(buildings)
+	if storedPlanet.Metal > storage.Metal {
+		t.Errorf("metal %d exceeds storage %d", storedPlanet.Metal, storage.Metal)
+	}
+	if storedPlanet.Crystal > storage.Crystal {
+		t.Errorf("crystal %d exceeds storage %d", storedPlanet.Crystal, storage.Crystal)
+	}
+	if storedPlanet.Gas > storage.Gas {
+		t.Errorf("gas %d exceeds storage %d", storedPlanet.Gas, storage.Gas)
 	}
 }

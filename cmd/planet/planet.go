@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const baseStorage = 10000
+
 type PlanetService struct {
 	repo Repository
 }
@@ -21,8 +23,7 @@ func (s *PlanetService) GetOrCreatePlanet(ctx context.Context, userID int) (Plan
 		if !errors.Is(err, ErrPlanetNotFound) {
 			return Planet{}, nil, err
 		}
-		p, b, err := s.repo.Create(ctx, userID)
-		return p, b, err
+		return s.repo.Create(ctx, userID)
 	}
 
 	buildings, err := s.repo.GetBuildings(ctx, planet.ID)
@@ -31,11 +32,12 @@ func (s *PlanetService) GetOrCreatePlanet(ctx context.Context, userID int) (Plan
 	}
 
 	prod := s.calculateProduction(buildings)
+	storage := s.calculateStorage(buildings)
 	elapsed := time.Since(planet.ResourcesUpdatedAt).Seconds()
 	if elapsed > 0 {
-		planet.Metal = planet.Metal + int(prod.Metal*elapsed)
-		planet.Crystal = planet.Crystal + int(prod.Crystal*elapsed)
-		planet.Gas = planet.Gas + int(prod.Gas*elapsed)
+		planet.Metal = minInt(planet.Metal+int(prod.Metal*elapsed), storage.Metal)
+		planet.Crystal = minInt(planet.Crystal+int(prod.Crystal*elapsed), storage.Crystal)
+		planet.Gas = minInt(planet.Gas+int(prod.Gas*elapsed), storage.Gas)
 	}
 
 	now := time.Now()
@@ -47,22 +49,37 @@ func (s *PlanetService) GetOrCreatePlanet(ctx context.Context, userID int) (Plan
 	return planet, buildings, nil
 }
 
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (s *PlanetService) calculateProduction(buildings []Building) Production {
 	levels := make(map[string]int)
 	for _, b := range buildings {
 		levels[b.Type] = b.Level
 	}
 
-	metalRate := productionRate("metal_mine", levels["metal_mine"])
-	crystalRate := productionRate("crystal_mine", levels["crystal_mine"])
-	gasRate := productionRate("gas_mine", levels["gas_mine"])
-	solarRate := productionRate("solar_plant", levels["solar_plant"])
-
 	return Production{
-		Metal:   metalRate / 60.0,
-		Crystal: crystalRate / 60.0,
-		Gas:     gasRate / 60.0,
-		Energy:  solarRate / 60.0,
+		Metal:   productionRate("metal_mine", levels["metal_mine"]) / 60.0,
+		Crystal: productionRate("crystal_mine", levels["crystal_mine"]) / 60.0,
+		Gas:     productionRate("gas_mine", levels["gas_mine"]) / 60.0,
+		Energy:  productionRate("solar_plant", levels["solar_plant"]) / 60.0,
+	}
+}
+
+func (s *PlanetService) calculateStorage(buildings []Building) Storage {
+	levels := make(map[string]int)
+	for _, b := range buildings {
+		levels[b.Type] = b.Level
+	}
+
+	return Storage{
+		Metal:   storageCapacity("metal_storage", levels["metal_storage"]),
+		Crystal: storageCapacity("crystal_storage", levels["crystal_storage"]),
+		Gas:     storageCapacity("gas_storage", levels["gas_storage"]),
 	}
 }
 
@@ -83,12 +100,20 @@ func productionRate(buildingType string, level int) float64 {
 	return 0
 }
 
-func toPlanetResponse(p Planet, buildings []Building, prod Production) PlanetResponse {
+func storageCapacity(buildingType string, level int) int {
+	if level < 1 {
+		return baseStorage
+	}
+	bonus := int(5000 * math.Pow(1.5, float64(level)))
+	return baseStorage + bonus
+}
+
+func toPlanetResponse(p Planet, buildings []Building, prod Production, storage Storage) PlanetResponse {
 	return PlanetResponse{
 		ID: p.ID, UserID: p.UserID, Name: p.Name,
 		Metal: p.Metal, Crystal: p.Crystal, Gas: p.Gas,
 		Energy: int(math.Round(prod.Energy * 60)),
 		Galaxy: p.Galaxy, System: p.System, Position: p.Position,
-		Buildings: buildings, Production: prod,
+		Buildings: buildings, Production: prod, Storage: storage,
 	}
 }

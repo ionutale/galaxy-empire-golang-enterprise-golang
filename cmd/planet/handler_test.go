@@ -47,11 +47,17 @@ func TestGetMyPlanet_WithUserID(t *testing.T) {
 	if resp.UserID != 7 {
 		t.Errorf("expected user_id 7, got %d", resp.UserID)
 	}
-	if len(resp.Buildings) != 4 {
-		t.Errorf("expected 4 buildings, got %d", len(resp.Buildings))
+	if len(resp.Buildings) != 7 {
+		t.Errorf("expected 7 buildings, got %d", len(resp.Buildings))
 	}
 	if resp.Production.Metal <= 0 {
 		t.Error("expected positive metal production")
+	}
+	if resp.Storage.Metal <= 0 {
+		t.Error("expected positive metal storage")
+	}
+	if resp.Storage.Metal <= resp.Metal {
+		t.Error("storage should exceed current resources")
 	}
 }
 

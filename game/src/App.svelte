@@ -85,16 +85,28 @@
             <span class="label">Metal</span>
             <span class="val">{planet.metal}</span>
             <span class="rate">+{planet.production.metal.toFixed(1)}/s</span>
+            <div class="storage-bar">
+              <div class="fill" style="width: {Math.min(100, planet.metal / planet.storage.metal * 100)}%"></div>
+            </div>
+            <span class="cap">{planet.metal}/{planet.storage.metal}</span>
           </div>
           <div class="res crystal">
             <span class="label">Crystal</span>
             <span class="val">{planet.crystal}</span>
             <span class="rate">+{planet.production.crystal.toFixed(1)}/s</span>
+            <div class="storage-bar">
+              <div class="fill" style="width: {Math.min(100, planet.crystal / planet.storage.crystal * 100)}%"></div>
+            </div>
+            <span class="cap">{planet.crystal}/{planet.storage.crystal}</span>
           </div>
           <div class="res gas">
             <span class="label">Gas</span>
             <span class="val">{planet.gas}</span>
             <span class="rate">+{planet.production.gas.toFixed(1)}/s</span>
+            <div class="storage-bar">
+              <div class="fill" style="width: {Math.min(100, planet.gas / planet.storage.gas * 100)}%"></div>
+            </div>
+            <span class="cap">{planet.gas}/{planet.storage.gas}</span>
           </div>
           <div class="res energy">
             <span class="label">Energy</span>
@@ -195,6 +207,11 @@
   .val { font-size: 1.25rem; font-weight: 600; }
   .rate { font-size: 0.7rem; color: #3a6a3a; }
   .energy .rate { color: #6a6a3a; }
+  .cap { font-size: 0.65rem; color: #5a5a6a; }
+  .storage-bar { height: 4px; background: #0a0e1a; border-radius: 2px; margin: 0.15rem 0; overflow: hidden; }
+  .storage-bar .fill { height: 100%; background: #2a5a3a; border-radius: 2px; transition: width 0.5s; }
+  .crystal .storage-bar .fill { background: #2a3a6a; }
+  .gas .storage-bar .fill { background: #3a5a3a; }
 
   .buildings { margin-top: 1.5rem; }
   .buildings h2 { font-size: 0.9rem; color: #8a9ab5; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }

@@ -65,9 +65,12 @@ func (r *PostgresRepository) Create(ctx context.Context, userID int) (Planet, []
 		return Planet{}, nil, fmt.Errorf("insert planet: %w", err)
 	}
 
-	seedBuildings := []string{"metal_mine", "crystal_mine", "gas_mine", "solar_plant"}
-	buildings := make([]Building, 0, len(seedBuildings))
-	for _, bType := range seedBuildings {
+	seedTypes := []string{
+		"metal_mine", "crystal_mine", "gas_mine", "solar_plant",
+		"metal_storage", "crystal_storage", "gas_storage",
+	}
+	buildings := make([]Building, 0, len(seedTypes))
+	for _, bType := range seedTypes {
 		var b Building
 		err := tx.QueryRow(ctx,
 			`INSERT INTO planet.buildings (planet_id, type, level)

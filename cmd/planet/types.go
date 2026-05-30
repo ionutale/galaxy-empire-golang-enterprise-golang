@@ -13,7 +13,7 @@ type Planet struct {
 	Galaxy             int
 	System             int
 	Position           int
-	ResourcesUpdatedAt time.Time `json:"-"`
+	ResourcesUpdatedAt time.Time
 }
 
 type Building struct {
@@ -30,6 +30,12 @@ type Production struct {
 	Energy  float64 `json:"energy"`
 }
 
+type Storage struct {
+	Metal   int `json:"metal"`
+	Crystal int `json:"crystal"`
+	Gas     int `json:"gas"`
+}
+
 type PlanetResponse struct {
 	ID         int        `json:"id"`
 	UserID     int        `json:"user_id"`
@@ -43,4 +49,5 @@ type PlanetResponse struct {
 	Position   int        `json:"position"`
 	Buildings  []Building `json:"buildings"`
 	Production Production `json:"production"`
+	Storage    Storage    `json:"storage"`
 }
