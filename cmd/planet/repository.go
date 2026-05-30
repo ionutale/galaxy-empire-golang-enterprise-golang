@@ -17,11 +17,16 @@ type Repository interface {
 	FindByID(ctx context.Context, planetID int) (Planet, error)
 	Create(ctx context.Context, userID int) (Planet, []Building, error)
 	UpdateResources(ctx context.Context, planetID, metal, crystal, gas int, updatedAt time.Time) error
+	UpdateMaxFields(ctx context.Context, planetID, maxFields int) error
 	GetBuildings(ctx context.Context, planetID int) ([]Building, error)
 	GetBuildingLevel(ctx context.Context, planetID int, buildingType string) (int, error)
 	GetActiveQueue(ctx context.Context, planetID int) ([]QueueEntry, error)
 	CreateQueueEntry(ctx context.Context, planetID int, buildingType string, targetLevel int, completesAt time.Time) (QueueEntry, error)
+	CreateQueueEntryDeconstruct(ctx context.Context, planetID int, buildingType string, targetLevel int, completesAt time.Time) (QueueEntry, error)
 	CompleteBuild(ctx context.Context, queueID int, buildingType string, targetLevel int) error
+	CancelQueueEntry(ctx context.Context, queueID int) error
+	DeleteBuilding(ctx context.Context, planetID int, buildingType string) error
+	UpdateBuildingLevel(ctx context.Context, planetID int, buildingType string, level int) error
 }
 
 type PostgresRepository struct {
@@ -36,11 +41,11 @@ func (r *PostgresRepository) FindByUserID(ctx context.Context, userID int) (Plan
 	var p Planet
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, user_id, name, metal, crystal, gas, energy,
-		        galaxy, system, position, resources_updated_at
+		        galaxy, system, position, max_fields, resources_updated_at
 		 FROM planet.planets WHERE user_id = $1`,
 		userID,
 	).Scan(&p.ID, &p.UserID, &p.Name, &p.Metal, &p.Crystal, &p.Gas, &p.Energy,
-		&p.Galaxy, &p.System, &p.Position, &p.ResourcesUpdatedAt)
+		&p.Galaxy, &p.System, &p.Position, &p.MaxFields, &p.ResourcesUpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Planet{}, ErrPlanetNotFound
@@ -54,11 +59,11 @@ func (r *PostgresRepository) FindByID(ctx context.Context, planetID int) (Planet
 	var p Planet
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, user_id, name, metal, crystal, gas, energy,
-		        galaxy, system, position, resources_updated_at
+		        galaxy, system, position, max_fields, resources_updated_at
 		 FROM planet.planets WHERE id = $1`,
 		planetID,
 	).Scan(&p.ID, &p.UserID, &p.Name, &p.Metal, &p.Crystal, &p.Gas, &p.Energy,
-		&p.Galaxy, &p.System, &p.Position, &p.ResourcesUpdatedAt)
+		&p.Galaxy, &p.System, &p.Position, &p.MaxFields, &p.ResourcesUpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Planet{}, ErrPlanetNotFound
@@ -77,13 +82,13 @@ func (r *PostgresRepository) Create(ctx context.Context, userID int) (Planet, []
 
 	var p Planet
 	err = tx.QueryRow(ctx,
-		`INSERT INTO planet.planets (user_id, resources_updated_at)
-		 VALUES ($1, NOW())
+		`INSERT INTO planet.planets (user_id, max_fields, resources_updated_at)
+		 VALUES ($1, $2, NOW())
 		 RETURNING id, user_id, name, metal, crystal, gas, energy,
-		           galaxy, system, position, resources_updated_at`,
-		userID,
+		           galaxy, system, position, max_fields, resources_updated_at`,
+		userID, baseMaxFields,
 	).Scan(&p.ID, &p.UserID, &p.Name, &p.Metal, &p.Crystal, &p.Gas, &p.Energy,
-		&p.Galaxy, &p.System, &p.Position, &p.ResourcesUpdatedAt)
+		&p.Galaxy, &p.System, &p.Position, &p.MaxFields, &p.ResourcesUpdatedAt)
 	if err != nil {
 		return Planet{}, nil, fmt.Errorf("insert planet: %w", err)
 	}
@@ -91,7 +96,7 @@ func (r *PostgresRepository) Create(ctx context.Context, userID int) (Planet, []
 	seedTypes := []string{
 		"metal_mine", "crystal_mine", "gas_mine", "solar_plant",
 		"metal_storage", "crystal_storage", "gas_storage",
-		"robotics_factory", "nanite_factory",
+		"robotics_factory", "nanite_factory", "terraformer",
 	}
 	buildings := make([]Building, 0, len(seedTypes))
 	for _, bType := range seedTypes {
@@ -120,6 +125,14 @@ func (r *PostgresRepository) UpdateResources(ctx context.Context, planetID, meta
 		 SET metal = $1, crystal = $2, gas = $3, resources_updated_at = $4
 		 WHERE id = $5`,
 		metal, crystal, gas, updatedAt, planetID,
+	)
+	return err
+}
+
+func (r *PostgresRepository) UpdateMaxFields(ctx context.Context, planetID, maxFields int) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE planet.planets SET max_fields = $1 WHERE id = $2`,
+		maxFields, planetID,
 	)
 	return err
 }
@@ -164,10 +177,10 @@ func (r *PostgresRepository) GetBuildingLevel(ctx context.Context, planetID int,
 
 func (r *PostgresRepository) GetActiveQueue(ctx context.Context, planetID int) ([]QueueEntry, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, building_type, target_level, completes_at
+		`SELECT id, building_type, target_level, status, completes_at
 		 FROM planet.construction_queue
 		 WHERE planet_id = $1 AND completed = FALSE
-		 ORDER BY completes_at`,
+		 ORDER BY started_at`,
 		planetID,
 	)
 	if err != nil {
@@ -178,10 +191,13 @@ func (r *PostgresRepository) GetActiveQueue(ctx context.Context, planetID int) (
 	var queue []QueueEntry
 	for rows.Next() {
 		var q QueueEntry
-		if err := rows.Scan(&q.ID, &q.BuildingType, &q.TargetLevel, &q.CompletesAt); err != nil {
+		if err := rows.Scan(&q.ID, &q.BuildingType, &q.TargetLevel, &q.Status, &q.CompletesAt); err != nil {
 			return nil, fmt.Errorf("scan queue entry: %w", err)
 		}
 		queue = append(queue, q)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate queue: %w", err)
 	}
 	return queue, nil
 }
@@ -189,13 +205,57 @@ func (r *PostgresRepository) GetActiveQueue(ctx context.Context, planetID int) (
 func (r *PostgresRepository) CreateQueueEntry(ctx context.Context, planetID int, buildingType string, targetLevel int, completesAt time.Time) (QueueEntry, error) {
 	var q QueueEntry
 	err := r.pool.QueryRow(ctx,
-		`INSERT INTO planet.construction_queue (planet_id, building_type, target_level, completes_at)
-		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, building_type, target_level, completes_at`,
+		`INSERT INTO planet.construction_queue (planet_id, building_type, target_level, status, completes_at)
+		 VALUES ($1, $2, $3, 'upgrade', $4)
+		 RETURNING id, building_type, target_level, status, completes_at`,
 		planetID, buildingType, targetLevel, completesAt,
-	).Scan(&q.ID, &q.BuildingType, &q.TargetLevel, &q.CompletesAt)
+	).Scan(&q.ID, &q.BuildingType, &q.TargetLevel, &q.Status, &q.CompletesAt)
 	if err != nil {
 		return QueueEntry{}, fmt.Errorf("create queue entry: %w", err)
+	}
+	return q, nil
+}
+
+func (r *PostgresRepository) CancelQueueEntry(ctx context.Context, queueID int) error {
+	_, err := r.pool.Exec(ctx,
+		`DELETE FROM planet.construction_queue WHERE id = $1 AND completed = FALSE`,
+		queueID,
+	)
+	if err != nil {
+		return fmt.Errorf("cancel queue entry: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) DeleteBuilding(ctx context.Context, planetID int, buildingType string) error {
+	_, err := r.pool.Exec(ctx,
+		`DELETE FROM planet.buildings WHERE planet_id = $1 AND type = $2`,
+		planetID, buildingType,
+	)
+	if err != nil {
+		return fmt.Errorf("delete building: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) UpdateBuildingLevel(ctx context.Context, planetID int, buildingType string, level int) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE planet.buildings SET level = $1 WHERE planet_id = $2 AND type = $3`,
+		level, planetID, buildingType,
+	)
+	return err
+}
+
+func (r *PostgresRepository) CreateQueueEntryDeconstruct(ctx context.Context, planetID int, buildingType string, targetLevel int, completesAt time.Time) (QueueEntry, error) {
+	var q QueueEntry
+	err := r.pool.QueryRow(ctx,
+		`INSERT INTO planet.construction_queue (planet_id, building_type, target_level, status, completes_at)
+		 VALUES ($1, $2, $3, 'deconstruct', $4)
+		 RETURNING id, building_type, target_level, status, completes_at`,
+		planetID, buildingType, targetLevel, completesAt,
+	).Scan(&q.ID, &q.BuildingType, &q.TargetLevel, &q.Status, &q.CompletesAt)
+	if err != nil {
+		return QueueEntry{}, fmt.Errorf("create deconstruct entry: %w", err)
 	}
 	return q, nil
 }

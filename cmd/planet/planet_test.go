@@ -50,6 +50,7 @@ func (m *mockRepo) Create(_ context.Context, userID int) (Planet, []Building, er
 		ID: m.nextPID, UserID: userID, Name: "Homeworld",
 		Metal: 500, Crystal: 300, Gas: 200, Energy: 50,
 		Galaxy: 1, System: 1, Position: 7,
+		MaxFields: 40,
 		ResourcesUpdatedAt: now,
 	}
 	m.nextPID++
@@ -58,7 +59,7 @@ func (m *mockRepo) Create(_ context.Context, userID int) (Planet, []Building, er
 	seedTypes := []string{
 		"metal_mine", "crystal_mine", "gas_mine", "solar_plant",
 		"metal_storage", "crystal_storage", "gas_storage",
-		"robotics_factory", "nanite_factory",
+		"robotics_factory", "nanite_factory", "terraformer",
 	}
 	buildings := make([]Building, 0, len(seedTypes))
 	for _, t := range seedTypes {
@@ -80,6 +81,16 @@ func (m *mockRepo) UpdateResources(_ context.Context, planetID, metal, crystal, 
 	p.Crystal = crystal
 	p.Gas = gas
 	p.ResourcesUpdatedAt = updatedAt
+	m.planets[planetID] = p
+	return nil
+}
+
+func (m *mockRepo) UpdateMaxFields(_ context.Context, planetID, maxFields int) error {
+	p, ok := m.planets[planetID]
+	if !ok {
+		return ErrPlanetNotFound
+	}
+	p.MaxFields = maxFields
 	m.planets[planetID] = p
 	return nil
 }
@@ -114,11 +125,54 @@ func (m *mockRepo) GetActiveQueue(_ context.Context, planetID int) ([]QueueEntry
 func (m *mockRepo) CreateQueueEntry(_ context.Context, planetID int, buildingType string, targetLevel int, completesAt time.Time) (QueueEntry, error) {
 	q := QueueEntry{
 		ID: m.nextQID, BuildingType: buildingType,
-		TargetLevel: targetLevel, CompletesAt: completesAt,
+		TargetLevel: targetLevel, Status: "upgrade", CompletesAt: completesAt,
 	}
 	m.nextQID++
 	m.queue[planetID] = append(m.queue[planetID], q)
 	return q, nil
+}
+
+func (m *mockRepo) CreateQueueEntryDeconstruct(_ context.Context, planetID int, buildingType string, targetLevel int, completesAt time.Time) (QueueEntry, error) {
+	q := QueueEntry{
+		ID: m.nextQID, BuildingType: buildingType,
+		TargetLevel: targetLevel, Status: "deconstruct", CompletesAt: completesAt,
+	}
+	m.nextQID++
+	m.queue[planetID] = append(m.queue[planetID], q)
+	return q, nil
+}
+
+func (m *mockRepo) CancelQueueEntry(_ context.Context, queueID int) error {
+	for pid, entries := range m.queue {
+		for i, q := range entries {
+			if q.ID == queueID {
+				m.queue[pid] = append(entries[:i], entries[i+1:]...)
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
+func (m *mockRepo) DeleteBuilding(_ context.Context, planetID int, buildingType string) error {
+	buildings := m.buildings[planetID]
+	for i, b := range buildings {
+		if b.Type == buildingType {
+			m.buildings[planetID] = append(buildings[:i], buildings[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *mockRepo) UpdateBuildingLevel(_ context.Context, planetID int, buildingType string, level int) error {
+	for i, b := range m.buildings[planetID] {
+		if b.Type == buildingType {
+			m.buildings[planetID][i].Level = level
+			return nil
+		}
+	}
+	return nil
 }
 
 func (m *mockRepo) CompleteBuild(_ context.Context, queueID int, buildingType string, targetLevel int) error {
@@ -147,8 +201,8 @@ func TestGetOrCreate_FirstCallCreatesWithBuildings(t *testing.T) {
 	if p.UserID != 42 {
 		t.Errorf("expected user_id 42, got %d", p.UserID)
 	}
-	if len(buildings) != 9 {
-		t.Errorf("expected 9 buildings, got %d", len(buildings))
+	if len(buildings) != 10 {
+		t.Errorf("expected 10 buildings, got %d", len(buildings))
 	}
 }
 

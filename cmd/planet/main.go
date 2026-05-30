@@ -91,6 +91,7 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			crystal INTEGER NOT NULL DEFAULT 300,
 			gas INTEGER NOT NULL DEFAULT 200,
 			energy INTEGER NOT NULL DEFAULT 50,
+			max_fields INTEGER NOT NULL DEFAULT 40,
 			resources_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -102,6 +103,13 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := pool.Exec(ctx, `
 		ALTER TABLE planet.planets
 		ADD COLUMN IF NOT EXISTS resources_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		ALTER TABLE planet.planets
+		ADD COLUMN IF NOT EXISTS max_fields INTEGER NOT NULL DEFAULT 40;
 	`); err != nil {
 		return err
 	}
@@ -133,10 +141,17 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	if _, err := pool.Exec(ctx, `
+		ALTER TABLE planet.construction_queue
+		ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'upgrade';
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
 		INSERT INTO planet.buildings (planet_id, type, level)
 		SELECT p.id, btype, 1
 		FROM planet.planets p
-		CROSS JOIN (VALUES ('robotics_factory'), ('nanite_factory')) AS t(btype)
+		CROSS JOIN (VALUES ('robotics_factory'), ('nanite_factory'), ('terraformer')) AS t(btype)
 		WHERE NOT EXISTS (
 			SELECT 1 FROM planet.buildings b
 			WHERE b.planet_id = p.id AND b.type = t.btype

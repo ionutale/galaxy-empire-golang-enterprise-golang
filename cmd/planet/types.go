@@ -13,6 +13,7 @@ type Planet struct {
 	Galaxy             int
 	System             int
 	Position           int
+	MaxFields          int
 	ResourcesUpdatedAt time.Time
 }
 
@@ -40,6 +41,7 @@ type QueueEntry struct {
 	ID           int       `json:"id"`
 	BuildingType string    `json:"building_type"`
 	TargetLevel  int       `json:"target_level"`
+	Status       string    `json:"status"`
 	CompletesAt  time.Time `json:"completes_at"`
 }
 
@@ -54,6 +56,8 @@ type PlanetResponse struct {
 	Galaxy     int          `json:"galaxy"`
 	System     int          `json:"system"`
 	Position   int          `json:"position"`
+	MaxFields  int          `json:"max_fields"`
+	FieldsUsed int          `json:"fields_used"`
 	Buildings  []Building   `json:"buildings"`
 	Production Production   `json:"production"`
 	Storage    Storage      `json:"storage"`
