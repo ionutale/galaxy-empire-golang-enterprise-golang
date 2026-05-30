@@ -14,16 +14,18 @@ type mockRepo struct {
 	nextPID    int
 	nextBID    int
 	nextQID    int
+	techLevels map[int]map[string]int
 }
 
 func newMockRepo() *mockRepo {
 	return &mockRepo{
-		planets:   make(map[int]Planet),
-		buildings: make(map[int][]Building),
-		queue:     make(map[int][]QueueEntry),
-		nextPID:   1,
-		nextBID:   1,
-		nextQID:   1,
+		planets:    make(map[int]Planet),
+		buildings:  make(map[int][]Building),
+		queue:      make(map[int][]QueueEntry),
+		nextPID:    1,
+		nextBID:    1,
+		nextQID:    1,
+		techLevels: make(map[int]map[string]int),
 	}
 }
 
@@ -217,6 +219,11 @@ func (m *mockRepo) UpdateBuildingLevel(_ context.Context, planetID int, building
 }
 
 func (m *mockRepo) GetTechLevel(_ context.Context, userID int, techType string) (int, error) {
+	if m.techLevels[userID] != nil {
+		if l, ok := m.techLevels[userID][techType]; ok {
+			return l, nil
+		}
+	}
 	if techType == "energy_tech" {
 		return 3, nil
 	}
@@ -869,5 +876,80 @@ func TestService_ProcessDeconstructCompletion_RemovesBuilding(t *testing.T) {
 	updatedBuildings, _ := mock.GetBuildings(context.Background(), planet.ID)
 	if len(updatedBuildings) != initialCount-1 {
 		t.Errorf("expected %d buildings, got %d", initialCount-1, len(updatedBuildings))
+	}
+}
+
+func addFusionReactor(m *mockRepo, planetID int) {
+	m.buildings[planetID] = append(m.buildings[planetID], Building{
+		ID: m.nextBID, PlanetID: planetID, Type: "fusion_reactor", Level: 0,
+	})
+	m.nextBID++
+}
+
+func TestFusionReactor_Gating_GasMineTooLow(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, b := range buildings {
+		if b.Type == "gas_mine" {
+			mock := svc.repo.(*mockRepo)
+			mock.buildings[planet.ID][i].Level = 4
+			break
+		}
+	}
+	mock := svc.repo.(*mockRepo)
+	addFusionReactor(mock, planet.ID)
+	_, err = svc.StartBuildingUpgrade(context.Background(), planet.ID, "fusion_reactor")
+	if err != ErrPrerequisitesNotMet {
+		t.Errorf("expected ErrPrerequisitesNotMet, got %v", err)
+	}
+}
+
+func TestFusionReactor_Gating_EnergyTechTooLow(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 51)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, b := range buildings {
+		if b.Type == "gas_mine" {
+			mock := svc.repo.(*mockRepo)
+			mock.buildings[planet.ID][i].Level = 5
+			break
+		}
+	}
+	mock := svc.repo.(*mockRepo)
+	addFusionReactor(mock, planet.ID)
+	mock.techLevels[51] = map[string]int{"energy_tech": 2}
+
+	_, err = svc.StartBuildingUpgrade(context.Background(), planet.ID, "fusion_reactor")
+	if err != ErrPrerequisitesNotMet {
+		t.Errorf("expected ErrPrerequisitesNotMet, got %v", err)
+	}
+}
+
+func TestFusionReactor_GatePasses(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 52)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := svc.repo.(*mockRepo)
+	for i, b := range buildings {
+		if b.Type == "gas_mine" {
+			mock.buildings[planet.ID][i].Level = 5
+			break
+		}
+	}
+	addFusionReactor(mock, planet.ID)
+
+	entry, err := svc.StartBuildingUpgrade(context.Background(), planet.ID, "fusion_reactor")
+	if err != nil {
+		t.Fatal("expected success, got:", err)
+	}
+	if entry.BuildingType != "fusion_reactor" {
+		t.Errorf("expected fusion_reactor, got %s", entry.BuildingType)
 	}
 }

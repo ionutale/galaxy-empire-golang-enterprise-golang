@@ -26,6 +26,7 @@ var ErrNoFieldsAvailable = errors.New("no fields available for construction")
 var ErrNoActiveUpgrade = errors.New("no active upgrade for this building")
 var ErrAlreadyDeconstructing = errors.New("building already queued for deconstruction")
 var ErrBuildingNotFound = errors.New("building not found")
+var ErrPrerequisitesNotMet = errors.New("prerequisites not met")
 
 type PlanetService struct {
 	repo Repository
@@ -146,6 +147,23 @@ func (s *PlanetService) StartBuildingUpgrade(ctx context.Context, planetID int, 
 		}
 	}
 
+	if buildingType == "fusion_reactor" {
+		gasLevel, err := s.repo.GetBuildingLevel(ctx, planetID, "gas_mine")
+		if err != nil {
+			return QueueEntry{}, err
+		}
+		if gasLevel < 5 {
+			return QueueEntry{}, ErrPrerequisitesNotMet
+		}
+		techLevel, err := s.repo.GetTechLevel(ctx, planet.UserID, "energy_tech")
+		if err != nil {
+			return QueueEntry{}, err
+		}
+		if techLevel < 3 {
+			return QueueEntry{}, ErrPrerequisitesNotMet
+		}
+	}
+
 	metalCost, crystalCost, gasCost := buildingCostResources(buildingType, currentLevel)
 	if planet.Metal < metalCost || planet.Crystal < crystalCost || planet.Gas < gasCost {
 		return QueueEntry{}, ErrInsufficientResources
@@ -250,6 +268,8 @@ func buildingCostResources(buildingType string, currentLevel int) (metal, crysta
 		return int(1000000 * math.Pow(2, next)), int(500000 * math.Pow(2, next)), int(100000 * math.Pow(2, next))
 	case "terraformer":
 		return int(50000 * math.Pow(2, next)), int(50000 * math.Pow(2, next)), int(50000 * math.Pow(2, next))
+	case "fusion_reactor":
+		return int(200 * math.Pow(2, next)), int(150 * math.Pow(2, next)), int(50 * math.Pow(2, next))
 	}
 	return 0, 0, 0
 }
