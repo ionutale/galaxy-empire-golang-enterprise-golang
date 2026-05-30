@@ -30,6 +30,9 @@ type Repository interface {
 	UpdateBuildingLevel(ctx context.Context, planetID int, buildingType string, level int) error
 	DeconstructComplete(ctx context.Context, planetID, queueID int, buildingType string, targetLevel int, refundMetal, refundCrystal, refundGas, maxFields int) error
 	GetTechLevel(ctx context.Context, userID int, techType string) (int, error)
+	GetPlayerProgress(ctx context.Context, planetID int) (vipPoints int, totalResources int, err error)
+	AddVIPPoints(ctx context.Context, planetID int, points int) error
+	AddResourcesProduced(ctx context.Context, planetID int, amount int) error
 }
 
 type PostgresRepository struct {
@@ -124,6 +127,14 @@ func (r *PostgresRepository) Create(ctx context.Context, userID int) (Planet, []
 		ON CONFLICT (user_id, type) DO NOTHING
 	`, userID); err != nil {
 		return Planet{}, nil, fmt.Errorf("insert default tech: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO planet.player_progress (user_id, vip_points, total_resources_produced)
+		VALUES ($1, 0, 0)
+		ON CONFLICT (user_id) DO NOTHING
+	`, userID); err != nil {
+		return Planet{}, nil, fmt.Errorf("create progress: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -357,6 +368,53 @@ func (r *PostgresRepository) GetTechLevel(ctx context.Context, userID int, techT
 		return 0, fmt.Errorf("get tech level: %w", err)
 	}
 	return level, nil
+}
+
+func (r *PostgresRepository) GetPlayerProgress(ctx context.Context, planetID int) (int, int, error) {
+	var vipPoints int
+	var totalResources int64
+	err := r.pool.QueryRow(ctx,
+		`SELECT pp.vip_points, pp.total_resources_produced
+		 FROM planet.player_progress pp
+		 JOIN planet.planets p ON p.user_id = pp.user_id
+		 WHERE p.id = $1`,
+		planetID,
+	).Scan(&vipPoints, &totalResources)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, 0, nil
+		}
+		return 0, 0, fmt.Errorf("get player progress: %w", err)
+	}
+	return vipPoints, int(totalResources), nil
+}
+
+func (r *PostgresRepository) AddVIPPoints(ctx context.Context, planetID int, points int) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE planet.player_progress pp
+		 SET vip_points = pp.vip_points + $1
+		 FROM planet.planets p
+		 WHERE p.id = $2 AND pp.user_id = p.user_id`,
+		points, planetID,
+	)
+	if err != nil {
+		return fmt.Errorf("add vip points: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) AddResourcesProduced(ctx context.Context, planetID int, amount int) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE planet.player_progress pp
+		 SET total_resources_produced = pp.total_resources_produced + $1
+		 FROM planet.planets p
+		 WHERE p.id = $2 AND pp.user_id = p.user_id`,
+		amount, planetID,
+	)
+	if err != nil {
+		return fmt.Errorf("add resources produced: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) CompleteBuild(ctx context.Context, queueID int, buildingType string, targetLevel int) error {

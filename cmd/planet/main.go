@@ -131,6 +131,29 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.player_progress (
+			id SERIAL PRIMARY KEY,
+			user_id INTEGER NOT NULL REFERENCES planet.planets(user_id) ON DELETE CASCADE UNIQUE,
+			vip_points INTEGER NOT NULL DEFAULT 0,
+			total_resources_produced BIGINT NOT NULL DEFAULT 0
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO planet.player_progress (user_id, vip_points, total_resources_produced)
+		SELECT p.user_id, 0, 0
+		FROM planet.planets p
+		WHERE NOT EXISTS (
+			SELECT 1 FROM planet.player_progress pp
+			WHERE pp.user_id = p.user_id
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS planet.buildings (
 			id SERIAL PRIMARY KEY,
 			planet_id INTEGER NOT NULL REFERENCES planet.planets(id) ON DELETE CASCADE,

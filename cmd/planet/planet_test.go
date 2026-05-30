@@ -14,7 +14,8 @@ type mockRepo struct {
 	nextPID    int
 	nextBID    int
 	nextQID    int
-	techLevels map[int]map[string]int
+	techLevels    map[int]map[string]int
+	playerProgress map[int]struct{ vipPoints, totalResources int }
 }
 
 func newMockRepo() *mockRepo {
@@ -25,7 +26,8 @@ func newMockRepo() *mockRepo {
 		nextPID:    1,
 		nextBID:    1,
 		nextQID:    1,
-		techLevels: make(map[int]map[string]int),
+		techLevels:    make(map[int]map[string]int),
+		playerProgress: make(map[int]struct{ vipPoints, totalResources int }),
 	}
 }
 
@@ -77,6 +79,7 @@ func (m *mockRepo) Create(_ context.Context, userID int) (Planet, []Building, er
 	}
 	m.buildings[p.ID] = buildings
 	m.queue[p.ID] = []QueueEntry{}
+	m.playerProgress[p.ID] = struct{ vipPoints, totalResources int }{0, 0}
 	return p, buildings, nil
 }
 
@@ -232,6 +235,28 @@ func (m *mockRepo) GetTechLevel(_ context.Context, userID int, techType string) 
 		return 3, nil
 	}
 	return 0, nil
+}
+
+func (m *mockRepo) GetPlayerProgress(_ context.Context, planetID int) (int, int, error) {
+	pp, ok := m.playerProgress[planetID]
+	if !ok {
+		return 0, 0, nil
+	}
+	return pp.vipPoints, pp.totalResources, nil
+}
+
+func (m *mockRepo) AddVIPPoints(_ context.Context, planetID int, points int) error {
+	pp := m.playerProgress[planetID]
+	pp.vipPoints += points
+	m.playerProgress[planetID] = pp
+	return nil
+}
+
+func (m *mockRepo) AddResourcesProduced(_ context.Context, planetID int, amount int) error {
+	pp := m.playerProgress[planetID]
+	pp.totalResources += amount
+	m.playerProgress[planetID] = pp
+	return nil
 }
 
 func (m *mockRepo) CompleteBuild(_ context.Context, queueID int, buildingType string, targetLevel int) error {
@@ -988,6 +1013,20 @@ func TestFusionReactor_ConsumesGas(t *testing.T) {
 	}
 	if gasPerMin > 11 {
 		t.Errorf("net gas should be reduced by fusion consumption, got %.4f/min", gasPerMin)
+	}
+}
+
+func TestPlayerProgress_Default(t *testing.T) {
+	mock := newMockRepo()
+	vip, total, err := mock.GetPlayerProgress(context.Background(), 1)
+	if err != nil {
+		t.Fatal("expected no error, got:", err)
+	}
+	if vip != 0 {
+		t.Errorf("expected 0 VIP points, got %d", vip)
+	}
+	if total != 0 {
+		t.Errorf("expected 0 total resources, got %d", total)
 	}
 }
 
