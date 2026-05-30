@@ -1030,6 +1030,113 @@ func TestPlayerProgress_Default(t *testing.T) {
 	}
 }
 
+func TestVIPLevelFromPoints(t *testing.T) {
+	tests := []struct {
+		points int
+		level  int
+	}{
+		{0, 0}, {50, 0}, {100, 1}, {499, 1}, {500, 2},
+		{1500, 3}, {5000, 4}, {15000, 5}, {40000, 6},
+		{100000, 7}, {250000, 8}, {500000, 9},
+		{1000000, 10}, {2000000, 11}, {5000000, 12}, {9999999, 12},
+	}
+	for _, tc := range tests {
+		got := vipLevelFromPoints(tc.points)
+		if got != tc.level {
+			t.Errorf("points=%d expected level %d, got %d", tc.points, tc.level, got)
+		}
+	}
+}
+
+func TestRankFromResources(t *testing.T) {
+	tests := []struct {
+		res  int
+		rank int
+	}{
+		{0, 0}, {500000, 0}, {1000000, 1}, {4999999, 1},
+		{5000000, 2}, {25000000, 3}, {100000000, 4},
+		{500000000, 5}, {1000000000, 6}, {5000000000, 7},
+		{25000000000, 8}, {100000000000, 9},
+	}
+	for _, tc := range tests {
+		got := rankFromResources(tc.res)
+		if got != tc.rank {
+			t.Errorf("resources=%d expected rank %d, got %d", tc.res, tc.rank, got)
+		}
+	}
+}
+
+func TestVIPProductionBonus(t *testing.T) {
+	if b := vipProductionBonus(0); b != 0 {
+		t.Errorf("level 0: expected 0, got %.2f", b)
+	}
+	if b := vipProductionBonus(10); b != 0.30 {
+		t.Errorf("level 10: expected 0.30, got %.2f", b)
+	}
+	if b := vipProductionBonus(12); b != 0.36 {
+		t.Errorf("level 12: expected 0.36, got %.2f", b)
+	}
+}
+
+func TestRankProductionBonus(t *testing.T) {
+	if b := rankProductionBonus(0); b != 0 {
+		t.Errorf("rank 0: expected 0, got %.2f", b)
+	}
+	if b := rankProductionBonus(5); b != 0.10 {
+		t.Errorf("rank 5: expected 0.10, got %.2f", b)
+	}
+	if b := rankProductionBonus(9); b != 0.20 {
+		t.Errorf("rank 9: expected 0.20, got %.2f", b)
+	}
+}
+
+func TestVIPPoints_EarnedOnBuildComplete(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := svc.repo.(*mockRepo)
+	initialVIP, _, _ := mock.GetPlayerProgress(context.Background(), planet.ID)
+
+	_, err = svc.StartBuildingUpgrade(context.Background(), planet.ID, buildings[0].Type)
+	if err != nil {
+		t.Fatal("start upgrade:", err)
+	}
+	mock.queue[planet.ID][0].CompletesAt = time.Now().Add(-1 * time.Second)
+	err = svc.processCompletedBuilds(context.Background(), planet.ID)
+	if err != nil {
+		t.Fatal("process builds:", err)
+	}
+
+	vip, _, _ := mock.GetPlayerProgress(context.Background(), planet.ID)
+	if vip != initialVIP+10 {
+		t.Errorf("expected %d VIP points, got %d", initialVIP+10, vip)
+	}
+}
+
+func TestTotalResources_TrackedOnPoll(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, _, err := svc.GetOrCreatePlanet(context.Background(), 61)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := svc.repo.(*mockRepo)
+	_, initialTotal, _ := mock.GetPlayerProgress(context.Background(), planet.ID)
+
+	time.Sleep(2 * time.Second)
+
+	_, _, err = svc.GetOrCreatePlanet(context.Background(), 61)
+	if err != nil {
+		t.Fatal("second call:", err)
+	}
+
+	_, total, _ := mock.GetPlayerProgress(context.Background(), planet.ID)
+	if total <= initialTotal {
+		t.Errorf("total resources should increase after poll, was %d now %d", initialTotal, total)
+	}
+}
+
 func TestFusionReactor_EnergyTechBoostsOutput(t *testing.T) {
 	svc := NewPlanetService(newMockRepo())
 	buildings := []Building{

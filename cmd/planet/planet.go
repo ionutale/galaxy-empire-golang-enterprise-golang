@@ -64,9 +64,21 @@ func (s *PlanetService) GetOrCreatePlanet(ctx context.Context, userID int) (Plan
 	elapsed := time.Since(planet.ResourcesUpdatedAt).Seconds()
 
 	if elapsed > 0 {
-		planet.Metal = minInt(planet.Metal+int(prod.Metal*elapsed), storage.Metal)
-		planet.Crystal = minInt(planet.Crystal+int(prod.Crystal*elapsed), storage.Crystal)
-		planet.Gas = minInt(planet.Gas+int(prod.Gas*elapsed), storage.Gas)
+		prevMetal, prevCrystal, prevGas := planet.Metal, planet.Crystal, planet.Gas
+		planet.Metal = minInt(prevMetal+int(prod.Metal*elapsed), storage.Metal)
+		planet.Crystal = minInt(prevCrystal+int(prod.Crystal*elapsed), storage.Crystal)
+		planet.Gas = minInt(prevGas+int(prod.Gas*elapsed), storage.Gas)
+
+		addedMetal := planet.Metal - prevMetal
+		addedCrystal := planet.Crystal - prevCrystal
+		addedGas := planet.Gas - prevGas
+
+		totalMined := addedMetal + addedCrystal + addedGas
+		if totalMined > 0 {
+			if err := s.repo.AddResourcesProduced(ctx, planet.ID, totalMined); err != nil {
+				return Planet{}, nil, err
+			}
+		}
 	}
 
 	now := time.Now()
@@ -99,6 +111,9 @@ func (s *PlanetService) processCompletedBuilds(ctx context.Context, planetID int
 					if err := s.repo.UpdateMaxFields(ctx, planetID, baseMaxFields+terraformerFields(q.TargetLevel)); err != nil {
 						return err
 					}
+				}
+				if err := s.repo.AddVIPPoints(ctx, planetID, 10); err != nil {
+					return err
 				}
 			}
 		}
@@ -472,6 +487,44 @@ func planetTypeAndTemp(position int) (typ string, temperature int) {
 		temperature = 20
 	}
 	return
+}
+
+func vipLevelFromPoints(points int) int {
+	thresholds := []int{100, 500, 1500, 5000, 15000, 40000, 100000, 250000, 500000, 1000000, 2000000, 5000000}
+	level := 0
+	for _, t := range thresholds {
+		if points >= t {
+			level++
+		} else {
+			break
+		}
+	}
+	return level
+}
+
+func rankFromResources(produced int) int {
+	thresholds := []int64{1000000, 5000000, 25000000, 100000000, 500000000, 1000000000, 5000000000, 25000000000, 100000000000}
+	rank := 0
+	for _, t := range thresholds {
+		if int64(produced) >= t {
+			rank++
+		} else {
+			break
+		}
+	}
+	return rank
+}
+
+func vipProductionBonus(vipLevel int) float64 {
+	return float64(vipLevel) * 0.03
+}
+
+func rankProductionBonus(rank int) float64 {
+	bonuses := []float64{0, 0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15, 0.18, 0.20}
+	if rank < 0 || rank >= len(bonuses) {
+		return 0
+	}
+	return bonuses[rank]
 }
 
 func toPlanetResponse(p Planet, buildings []Building, prod Production, storage Storage, queue []QueueEntry) PlanetResponse {
