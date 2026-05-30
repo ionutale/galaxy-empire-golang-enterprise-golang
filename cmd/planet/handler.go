@@ -270,6 +270,96 @@ func (h *Handler) GetPositions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) ListShips(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid user"})
+		return
+	}
+
+	planet, _, err := h.service.GetOrCreatePlanet(r.Context(), userID)
+	if err != nil {
+		slog.Error("get planet failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	shipyardLevel, _ := h.service.repo.GetBuildingLevel(r.Context(), planet.ID, "shipyard")
+	playerShips, _ := h.service.repo.GetPlayerShips(r.Context(), planet.ID)
+
+	ships := make([]ShipResponse, len(Ships))
+	for i, cfg := range Ships {
+		ships[i] = ShipResponse{
+			Type: cfg.Type, Name: cfg.Name,
+			Metal: cfg.Metal, Crystal: cfg.Crystal, Gas: cfg.Gas,
+			Speed: cfg.Speed, Cargo: cfg.Cargo, Fuel: cfg.Fuel,
+			Strength: cfg.Strength, Shield: cfg.Shield, Attack: cfg.Attack,
+			Quantity: playerShips[cfg.Type],
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"shipyard_level": shipyardLevel,
+		"ships":          ships,
+	})
+}
+
+func (h *Handler) BuildShips(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid user"})
+		return
+	}
+
+	planet, _, err := h.service.GetOrCreatePlanet(r.Context(), userID)
+	if err != nil {
+		slog.Error("get planet failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	var req BuildRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	quantity, err := h.service.BuildShips(r.Context(), planet.ID, req.ShipType, req.Quantity)
+	if err != nil {
+		slog.Error("build ships failed", "ship_type", req.ShipType, "error", err)
+		msg := "internal error"
+		code := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, ErrInvalidShip):
+			msg = "invalid ship type"
+			code = http.StatusBadRequest
+		case errors.Is(err, ErrNoShipyard):
+			msg = "no shipyard"
+			code = http.StatusBadRequest
+		case errors.Is(err, ErrInsufficientResources):
+			msg = "insufficient resources"
+			code = http.StatusBadRequest
+		}
+		writeJSON(w, code, map[string]string{"error": msg})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"type":     req.ShipType,
+		"quantity": quantity,
+	})
+}
+
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
