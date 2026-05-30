@@ -50,6 +50,7 @@ func main() {
 
 	r.Get("/api/planet/mine", h.GetMyPlanet)
 	r.Post("/api/buildings/{type}/upgrade", h.StartUpgrade)
+	r.Post("/api/buildings/{type}/cancel", h.CancelUpgrade)
 
 	srv := &http.Server{Addr: ":8082", Handler: r}
 	go func() {

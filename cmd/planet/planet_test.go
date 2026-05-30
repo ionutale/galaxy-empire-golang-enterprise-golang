@@ -142,6 +142,19 @@ func (m *mockRepo) CreateQueueEntryDeconstruct(_ context.Context, planetID int, 
 	return q, nil
 }
 
+func (m *mockRepo) CancelUpgradeWithRefund(ctx context.Context, planetID, queueID, refundMetal, refundCrystal, refundGas int) error {
+	p, ok := m.planets[planetID]
+	if !ok {
+		return ErrPlanetNotFound
+	}
+	p.Metal += refundMetal
+	p.Crystal += refundCrystal
+	p.Gas += refundGas
+	m.planets[planetID] = p
+
+	return m.CancelQueueEntry(ctx, queueID)
+}
+
 func (m *mockRepo) CancelQueueEntry(_ context.Context, queueID int) error {
 	for pid, entries := range m.queue {
 		for i, q := range entries {
@@ -604,5 +617,56 @@ func TestService_ProcessCompletedBuilds(t *testing.T) {
 	newLevel := mock.buildings[p.ID][0].Level
 	if newLevel <= oldLevel {
 		t.Errorf("building level should have increased: old=%d new=%d", oldLevel, newLevel)
+	}
+}
+
+func TestService_CancelUpgrade_RefundsResources(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := svc.repo.(*mockRepo)
+	initialMetal := planet.Metal
+	initialCrystal := planet.Crystal
+	initialGas := planet.Gas
+
+	building := buildings[0]
+	buildingLevel := building.Level
+	_, err = svc.StartBuildingUpgrade(context.Background(), planet.ID, building.Type)
+	if err != nil {
+		t.Fatal("start upgrade:", err)
+	}
+
+	err = svc.CancelUpgrade(context.Background(), planet.ID, building.Type)
+	if err != nil {
+		t.Fatal("cancel upgrade:", err)
+	}
+
+	metalCost, crystalCost, gasCost := buildingCostResources(building.Type, buildingLevel)
+	updatedPlanet := mock.planets[planet.ID]
+	expectedMetal := initialMetal - metalCost + metalCost/2
+	expectedCrystal := initialCrystal - crystalCost + crystalCost/2
+	expectedGas := initialGas - gasCost + gasCost/2
+	if updatedPlanet.Metal != expectedMetal {
+		t.Errorf("expected metal %d, got %d", expectedMetal, updatedPlanet.Metal)
+	}
+	if updatedPlanet.Crystal != expectedCrystal {
+		t.Errorf("expected crystal %d, got %d", expectedCrystal, updatedPlanet.Crystal)
+	}
+	if updatedPlanet.Gas != expectedGas {
+		t.Errorf("expected gas %d, got %d", expectedGas, updatedPlanet.Gas)
+	}
+}
+
+func TestService_CancelUpgrade_NoActiveUpgrade(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, _, err := svc.GetOrCreatePlanet(context.Background(), 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = svc.CancelUpgrade(context.Background(), planet.ID, "metal_mine")
+	if err == nil {
+		t.Error("expected error for no active upgrade")
 	}
 }

@@ -8,10 +8,13 @@ import (
 )
 
 const baseStorage = 10000
+const baseMaxFields = 40
 
 var ErrInsufficientResources = errors.New("insufficient resources")
 var ErrAlreadyQueued = errors.New("building already in queue")
 var ErrInvalidBuilding = errors.New("invalid building type")
+var ErrNoFieldsAvailable = errors.New("no fields available for construction")
+var ErrNoActiveUpgrade = errors.New("no active upgrade for this building")
 
 type PlanetService struct {
 	repo Repository
@@ -71,6 +74,11 @@ func (s *PlanetService) processCompletedBuilds(ctx context.Context, planetID int
 			if err := s.repo.CompleteBuild(ctx, q.ID, q.BuildingType, q.TargetLevel); err != nil {
 				return err
 			}
+			if q.BuildingType == "terraformer" {
+				if err := s.repo.UpdateMaxFields(ctx, planetID, baseMaxFields+terraformerFields(q.TargetLevel)); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
@@ -97,6 +105,16 @@ func (s *PlanetService) StartBuildingUpgrade(ctx context.Context, planetID int, 
 		return QueueEntry{}, err
 	}
 
+	if buildingType != "terraformer" {
+		buildings, err := s.repo.GetBuildings(ctx, planetID)
+		if err != nil {
+			return QueueEntry{}, err
+		}
+		if len(buildings) >= planet.MaxFields {
+			return QueueEntry{}, ErrNoFieldsAvailable
+		}
+	}
+
 	metalCost, crystalCost, gasCost := buildingCostResources(buildingType, currentLevel)
 	if planet.Metal < metalCost || planet.Crystal < crystalCost || planet.Gas < gasCost {
 		return QueueEntry{}, ErrInsufficientResources
@@ -116,6 +134,31 @@ func (s *PlanetService) StartBuildingUpgrade(ctx context.Context, planetID int, 
 	}
 
 	return entry, nil
+}
+
+func (s *PlanetService) CancelUpgrade(ctx context.Context, planetID int, buildingType string) error {
+	queue, err := s.repo.GetActiveQueue(ctx, planetID)
+	if err != nil {
+		return err
+	}
+
+	var targetEntry *QueueEntry
+	for _, q := range queue {
+		if q.BuildingType == buildingType && q.Status == "upgrade" {
+			targetEntry = &q
+			break
+		}
+	}
+	if targetEntry == nil {
+		return ErrNoActiveUpgrade
+	}
+
+	metalCost, crystalCost, gasCost := buildingCostResources(buildingType, targetEntry.TargetLevel-1)
+	refundMetal := metalCost / 2
+	refundCrystal := crystalCost / 2
+	refundGas := gasCost / 2
+
+	return s.repo.CancelUpgradeWithRefund(ctx, planetID, targetEntry.ID, refundMetal, refundCrystal, refundGas)
 }
 
 func buildingCostResources(buildingType string, currentLevel int) (metal, crystal, gas int) {
@@ -139,8 +182,14 @@ func buildingCostResources(buildingType string, currentLevel int) (metal, crysta
 		return int(400 * math.Pow(2, next)), int(120 * math.Pow(2, next)), int(200 * math.Pow(2, next))
 	case "nanite_factory":
 		return int(1000000 * math.Pow(2, next)), int(500000 * math.Pow(2, next)), int(100000 * math.Pow(2, next))
+	case "terraformer":
+		return int(50000 * math.Pow(2, next)), int(50000 * math.Pow(2, next)), int(50000 * math.Pow(2, next))
 	}
 	return 0, 0, 0
+}
+
+func terraformerFields(level int) int {
+	return 5 * level
 }
 
 func buildingBuildDuration(buildingType string, currentLevel int, roboticsLevel int, naniteLevel int) time.Duration {
@@ -252,6 +301,7 @@ func toPlanetResponse(p Planet, buildings []Building, prod Production, storage S
 		Metal: p.Metal, Crystal: p.Crystal, Gas: p.Gas,
 		Energy: p.Energy,
 		Galaxy: p.Galaxy, System: p.System, Position: p.Position,
+		MaxFields: p.MaxFields, FieldsUsed: len(buildings),
 		Buildings: buildings, Production: prod, Storage: storage, Queue: queue,
 	}
 }

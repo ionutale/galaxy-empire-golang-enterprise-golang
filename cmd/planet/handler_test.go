@@ -17,6 +17,7 @@ func setupTestRouter(h *Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/api/planet/mine", h.GetMyPlanet)
 	r.Post("/api/buildings/{type}/upgrade", h.StartUpgrade)
+	r.Post("/api/buildings/{type}/cancel", h.CancelUpgrade)
 	return r
 }
 
@@ -49,8 +50,8 @@ func TestGetMyPlanet_WithUserID(t *testing.T) {
 	if resp.UserID != 7 {
 		t.Errorf("expected user_id 7, got %d", resp.UserID)
 	}
-	if len(resp.Buildings) != 9 {
-		t.Errorf("expected 9 buildings, got %d", len(resp.Buildings))
+	if len(resp.Buildings) != 10 {
+		t.Errorf("expected 10 buildings, got %d", len(resp.Buildings))
 	}
 	if resp.Production.Metal <= 0 {
 		t.Error("expected positive metal production")
@@ -147,6 +148,37 @@ func TestStartUpgrade_AlreadyQueued(t *testing.T) {
 	resp2 := makeReq()
 	if resp2.StatusCode != http.StatusConflict {
 		t.Errorf("second upgrade expected 409, got %d", resp2.StatusCode)
+	}
+}
+
+func TestCancelUpgrade_Success(t *testing.T) {
+	router := setupTestRouter(setupTestHandler())
+
+	req1 := httptest.NewRequest("POST", "/api/buildings/metal_mine/upgrade", nil)
+	req1.Header.Set("X-User-ID", "1")
+	rec1 := httptest.NewRecorder()
+	router.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("upgrade expected 200, got %d", rec1.Code)
+	}
+
+	req2 := httptest.NewRequest("POST", "/api/buildings/metal_mine/cancel", nil)
+	req2.Header.Set("X-User-ID", "1")
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Errorf("cancel expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+func TestCancelUpgrade_NoActiveUpgrade(t *testing.T) {
+	router := setupTestRouter(setupTestHandler())
+	req := httptest.NewRequest("POST", "/api/buildings/metal_mine/cancel", nil)
+	req.Header.Set("X-User-ID", "1")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
 	}
 }
 
