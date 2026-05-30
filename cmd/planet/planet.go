@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"time"
@@ -27,6 +28,8 @@ var ErrNoActiveUpgrade = errors.New("no active upgrade for this building")
 var ErrAlreadyDeconstructing = errors.New("building already queued for deconstruction")
 var ErrBuildingNotFound = errors.New("building not found")
 var ErrPrerequisitesNotMet = errors.New("prerequisites not met")
+var ErrInvalidShip = errors.New("invalid ship type")
+var ErrNoShipyard = errors.New("no shipyard")
 
 type PlanetService struct {
 	repo Repository
@@ -270,6 +273,48 @@ func (s *PlanetService) QueueDeconstruction(ctx context.Context, planetID int, b
 	}
 
 	return entry, nil
+}
+
+func (s *PlanetService) BuildShips(ctx context.Context, planetID int, shipType string, quantity int) (int, error) {
+	cfg, ok := shipConfig(shipType)
+	if !ok {
+		return 0, ErrInvalidShip
+	}
+
+	if quantity < 1 {
+		return 0, fmt.Errorf("quantity must be positive")
+	}
+
+	shipyardLevel, err := s.repo.GetBuildingLevel(ctx, planetID, "shipyard")
+	if err != nil {
+		return 0, err
+	}
+	if shipyardLevel < 1 {
+		return 0, ErrNoShipyard
+	}
+
+	planet, err := s.repo.FindByID(ctx, planetID)
+	if err != nil {
+		return 0, err
+	}
+
+	totalMetal := cfg.Metal * quantity
+	totalCrystal := cfg.Crystal * quantity
+	totalGas := cfg.Gas * quantity
+
+	if planet.Metal < totalMetal || planet.Crystal < totalCrystal || planet.Gas < totalGas {
+		return 0, ErrInsufficientResources
+	}
+
+	if err := s.repo.UpdateResources(ctx, planetID, planet.Metal-totalMetal, planet.Crystal-totalCrystal, planet.Gas-totalGas, time.Now()); err != nil {
+		return 0, err
+	}
+
+	if err := s.repo.AddPlayerShips(ctx, planetID, planet.UserID, shipType, quantity); err != nil {
+		return 0, err
+	}
+
+	return quantity, nil
 }
 
 func buildingCostResources(buildingType string, currentLevel int) (metal, crystal, gas int) {
