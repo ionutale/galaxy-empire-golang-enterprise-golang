@@ -4,11 +4,20 @@ import (
 	"context"
 	"errors"
 	"math"
+	"math/rand"
 	"time"
 )
 
 const baseStorage = 10000
 const baseMaxFields = 40
+
+const (
+	PlanetTypeTerran   = "terran"
+	PlanetTypeDesert   = "desert"
+	PlanetTypeIce      = "ice"
+	PlanetTypeVolcanic = "volcanic"
+	PlanetTypeGasGiant = "gas_giant"
+)
 
 var ErrInsufficientResources = errors.New("insufficient resources")
 var ErrAlreadyQueued = errors.New("building already in queue")
@@ -352,6 +361,41 @@ func storageCapacity(buildingType string, level int) int {
 	return baseStorage + int(5000*math.Pow(1.5, float64(level)))
 }
 
+func planetTypeAndTemp(position int) (typ string, temperature int) {
+	switch {
+	case position >= 1 && position <= 3:
+		if rand.Intn(100) < 80 {
+			typ = PlanetTypeDesert
+		} else {
+			typ = PlanetTypeVolcanic
+		}
+		temperature = 60 + rand.Intn(41) // 60-100
+	case position >= 4 && position <= 6:
+		typ = PlanetTypeTerran
+		temperature = 10 + rand.Intn(31) // 10-40
+	case position == 7:
+		typ = PlanetTypeTerran
+		temperature = rand.Intn(21) // 0-20
+	case position >= 8 && position <= 9:
+		if rand.Intn(100) < 60 {
+			typ = PlanetTypeTerran
+		} else {
+			typ = PlanetTypeIce
+		}
+		temperature = -10 + rand.Intn(41) // -10-30
+	case position >= 10 && position <= 12:
+		typ = PlanetTypeIce
+		temperature = -50 + rand.Intn(51) // -50-0
+	case position >= 13 && position <= 15:
+		typ = PlanetTypeGasGiant
+		temperature = -80 + rand.Intn(51) // -80--30
+	default:
+		typ = PlanetTypeTerran
+		temperature = 20
+	}
+	return
+}
+
 func toPlanetResponse(p Planet, buildings []Building, prod Production, storage Storage, queue []QueueEntry) PlanetResponse {
 	return PlanetResponse{
 		ID: p.ID, UserID: p.UserID, Name: p.Name,
@@ -359,6 +403,7 @@ func toPlanetResponse(p Planet, buildings []Building, prod Production, storage S
 		Energy: p.Energy,
 		Galaxy: p.Galaxy, System: p.System, Position: p.Position,
 		MaxFields: p.MaxFields, FieldsUsed: len(buildings),
+		Type: p.Type, Temperature: p.Temperature,
 		Buildings: buildings, Production: prod, Storage: storage, Queue: queue,
 	}
 }

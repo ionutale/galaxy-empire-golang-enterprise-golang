@@ -117,6 +117,20 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	if _, err := pool.Exec(ctx, `
+		ALTER TABLE planet.planets
+		ADD COLUMN IF NOT EXISTS type VARCHAR(20) NOT NULL DEFAULT 'terran';
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		ALTER TABLE planet.planets
+		ADD COLUMN IF NOT EXISTS temperature INTEGER NOT NULL DEFAULT 20;
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS planet.buildings (
 			id SERIAL PRIMARY KEY,
 			planet_id INTEGER NOT NULL REFERENCES planet.planets(id) ON DELETE CASCADE,

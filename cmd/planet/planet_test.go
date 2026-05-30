@@ -51,6 +51,8 @@ func (m *mockRepo) Create(_ context.Context, userID int) (Planet, []Building, er
 		Metal: 500, Crystal: 300, Gas: 200, Energy: 50,
 		Galaxy: 1, System: 1, Position: 7,
 		MaxFields: 40,
+		Type:       "terran",
+		Temperature: 15,
 		ResourcesUpdatedAt: now,
 	}
 	m.nextPID++
@@ -229,6 +231,23 @@ func (m *mockRepo) CompleteBuild(_ context.Context, queueID int, buildingType st
 		}
 	}
 	return nil
+}
+
+func TestPlanetTypeAndTemp_HomePlanet(t *testing.T) {
+	typ, temp := planetTypeAndTemp(7)
+	if typ != "terran" {
+		t.Errorf("expected terran, got %s", typ)
+	}
+	if temp < 0 || temp > 20 {
+		t.Errorf("expected temp 0-20 for home, got %d", temp)
+	}
+}
+
+func TestPlanetTypeAndTemp_Position1(t *testing.T) {
+	typ, _ := planetTypeAndTemp(1)
+	if typ != "desert" && typ != "volcanic" {
+		t.Errorf("expected desert or volcanic for pos 1, got %s", typ)
+	}
 }
 
 func TestGetOrCreate_FirstCallCreatesWithBuildings(t *testing.T) {

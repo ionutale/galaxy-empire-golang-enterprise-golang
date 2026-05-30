@@ -43,11 +43,11 @@ func (r *PostgresRepository) FindByUserID(ctx context.Context, userID int) (Plan
 	var p Planet
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, user_id, name, metal, crystal, gas, energy,
-		        galaxy, system, position, max_fields, resources_updated_at
+		        galaxy, system, position, max_fields, type, temperature, resources_updated_at
 		 FROM planet.planets WHERE user_id = $1`,
 		userID,
 	).Scan(&p.ID, &p.UserID, &p.Name, &p.Metal, &p.Crystal, &p.Gas, &p.Energy,
-		&p.Galaxy, &p.System, &p.Position, &p.MaxFields, &p.ResourcesUpdatedAt)
+		&p.Galaxy, &p.System, &p.Position, &p.MaxFields, &p.Type, &p.Temperature, &p.ResourcesUpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Planet{}, ErrPlanetNotFound
@@ -61,11 +61,11 @@ func (r *PostgresRepository) FindByID(ctx context.Context, planetID int) (Planet
 	var p Planet
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, user_id, name, metal, crystal, gas, energy,
-		        galaxy, system, position, max_fields, resources_updated_at
+		        galaxy, system, position, max_fields, type, temperature, resources_updated_at
 		 FROM planet.planets WHERE id = $1`,
 		planetID,
 	).Scan(&p.ID, &p.UserID, &p.Name, &p.Metal, &p.Crystal, &p.Gas, &p.Energy,
-		&p.Galaxy, &p.System, &p.Position, &p.MaxFields, &p.ResourcesUpdatedAt)
+		&p.Galaxy, &p.System, &p.Position, &p.MaxFields, &p.Type, &p.Temperature, &p.ResourcesUpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Planet{}, ErrPlanetNotFound
@@ -82,15 +82,17 @@ func (r *PostgresRepository) Create(ctx context.Context, userID int) (Planet, []
 	}
 	defer tx.Rollback(ctx)
 
+	typ, temp := planetTypeAndTemp(7)
+
 	var p Planet
 	err = tx.QueryRow(ctx,
-		`INSERT INTO planet.planets (user_id, max_fields, resources_updated_at)
-		 VALUES ($1, $2, NOW())
+		`INSERT INTO planet.planets (user_id, max_fields, type, temperature, resources_updated_at)
+		 VALUES ($1, $2, $3, $4, NOW())
 		 RETURNING id, user_id, name, metal, crystal, gas, energy,
-		           galaxy, system, position, max_fields, resources_updated_at`,
-		userID, baseMaxFields,
+		           galaxy, system, position, max_fields, type, temperature, resources_updated_at`,
+		userID, baseMaxFields, typ, temp,
 	).Scan(&p.ID, &p.UserID, &p.Name, &p.Metal, &p.Crystal, &p.Gas, &p.Energy,
-		&p.Galaxy, &p.System, &p.Position, &p.MaxFields, &p.ResourcesUpdatedAt)
+		&p.Galaxy, &p.System, &p.Position, &p.MaxFields, &p.Type, &p.Temperature, &p.ResourcesUpdatedAt)
 	if err != nil {
 		return Planet{}, nil, fmt.Errorf("insert planet: %w", err)
 	}

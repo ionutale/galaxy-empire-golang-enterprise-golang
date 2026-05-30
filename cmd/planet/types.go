@@ -14,6 +14,8 @@ type Planet struct {
 	System             int
 	Position           int
 	MaxFields          int
+	Type               string
+	Temperature        int
 	ResourcesUpdatedAt time.Time
 }
 
@@ -56,9 +58,11 @@ type PlanetResponse struct {
 	Galaxy     int          `json:"galaxy"`
 	System     int          `json:"system"`
 	Position   int          `json:"position"`
-	MaxFields  int          `json:"max_fields"`
-	FieldsUsed int          `json:"fields_used"`
-	Buildings  []Building   `json:"buildings"`
+	MaxFields   int          `json:"max_fields"`
+	FieldsUsed  int          `json:"fields_used"`
+	Type        string       `json:"type"`
+	Temperature int          `json:"temperature"`
+	Buildings   []Building   `json:"buildings"`
 	Production Production   `json:"production"`
 	Storage    Storage      `json:"storage"`
 	Queue      []QueueEntry `json:"queue"`
