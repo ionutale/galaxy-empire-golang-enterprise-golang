@@ -1,0 +1,14 @@
+-- +goose Up
+CREATE SCHEMA IF NOT EXISTS auth;
+
+CREATE TABLE IF NOT EXISTS auth.users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- +goose Down
+DROP TABLE IF EXISTS auth.users;
+DROP SCHEMA IF EXISTS auth;

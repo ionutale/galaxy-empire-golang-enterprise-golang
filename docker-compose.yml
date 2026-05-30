@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: galaxy
+      POSTGRES_PASSWORD: galaxy_dev
+      POSTGRES_DB: galaxy_empire
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U galaxy -d galaxy_empire"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8088:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      gateway:
+        condition: service_started
+      game:
+        condition: service_started
+
+  game:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./game:/app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      - NODE_ENV=development
+
+  gateway:
+    build: ./cmd/gateway
+    environment:
+      PLANET_SERVICE_ADDR: http://planet:8082
+      AUTH_SERVICE_ADDR: http://auth:8081
+      JWT_SECRET: dev-secret-change-in-production
+    depends_on:
+      auth:
+        condition: service_started
+      planet:
+        condition: service_started
+
+  auth:
+    build: ./cmd/auth
+    environment:
+      DATABASE_URL: postgres://galaxy:galaxy_dev@postgres:5432/galaxy_empire?sslmode=disable
+      JWT_SECRET: dev-secret-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  planet:
+    build: ./cmd/planet
+    depends_on:
+      auth:
+        condition: service_started
+
+volumes:
+  pgdata:
