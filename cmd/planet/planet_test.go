@@ -305,6 +305,14 @@ func (m *mockRepo) GetSystemPositions(_ context.Context, systemID int) ([]Positi
 	return positions, nil
 }
 
+func (m *mockRepo) GetPlayerShips(_ context.Context, planetID int) (map[string]int, error) {
+	return nil, nil
+}
+
+func (m *mockRepo) AddPlayerShips(_ context.Context, planetID, planetUserID int, shipType string, quantity int) error {
+	return nil
+}
+
 func TestGetTechLevel_NonExistent(t *testing.T) {
 	mock := newMockRepo()
 	level, err := mock.GetTechLevel(context.Background(), 1, "weapons_tech")

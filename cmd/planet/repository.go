@@ -36,6 +36,8 @@ type Repository interface {
 	ListGalaxies(ctx context.Context) ([]Galaxy, error)
 	ListSystems(ctx context.Context, galaxyID int, page, pageSize int) ([]System, int, error)
 	GetSystemPositions(ctx context.Context, systemID int) ([]Position, error)
+	GetPlayerShips(ctx context.Context, planetID int) (map[string]int, error)
+	AddPlayerShips(ctx context.Context, planetID, planetUserID int, shipType string, quantity int) error
 }
 
 type PostgresRepository struct {
@@ -505,6 +507,36 @@ func (r *PostgresRepository) GetSystemPositions(ctx context.Context, systemID in
 		positions = append(positions, pos)
 	}
 	return positions, rows.Err()
+}
+
+func (r *PostgresRepository) GetPlayerShips(ctx context.Context, planetID int) (map[string]int, error) {
+	rows, err := r.pool.Query(ctx, `SELECT ship_type, quantity FROM planet.player_ships WHERE planet_id = $1`, planetID)
+	if err != nil {
+		return nil, fmt.Errorf("get player ships: %w", err)
+	}
+	defer rows.Close()
+
+	ships := make(map[string]int)
+	for rows.Next() {
+		var shipType string
+		var quantity int
+		if err := rows.Scan(&shipType, &quantity); err != nil {
+			return nil, fmt.Errorf("scan ship: %w", err)
+		}
+		ships[shipType] = quantity
+	}
+	return ships, rows.Err()
+}
+
+func (r *PostgresRepository) AddPlayerShips(ctx context.Context, planetID, planetUserID int, shipType string, quantity int) error {
+	if _, err := r.pool.Exec(ctx, `
+		INSERT INTO planet.player_ships (planet_id, ship_type, quantity)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (planet_id, ship_type) DO UPDATE SET quantity = planet.player_ships.quantity + $3
+	`, planetID, shipType, quantity); err != nil {
+		return fmt.Errorf("add player ships: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) CompleteBuild(ctx context.Context, queueID int, buildingType string, targetLevel int) error {
