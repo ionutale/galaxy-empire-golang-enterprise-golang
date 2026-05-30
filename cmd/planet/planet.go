@@ -54,8 +54,12 @@ func (s *PlanetService) GetOrCreatePlanet(ctx context.Context, userID int) (Plan
 		return Planet{}, nil, err
 	}
 
-	netEnergy, efficiency := calculatePenaltyFactor(buildings)
-	prod := s.calculateProduction(buildings, efficiency, planet.Type, planet.Temperature)
+	energyTechLevel, err := s.repo.GetTechLevel(ctx, planet.UserID, "energy_tech")
+	if err != nil {
+		return Planet{}, nil, err
+	}
+	netEnergy, efficiency := calculatePenaltyFactor(buildings, energyTechLevel)
+	prod := s.calculateProduction(buildings, efficiency, planet.Type, planet.Temperature, energyTechLevel)
 	storage := s.calculateStorage(buildings)
 	elapsed := time.Since(planet.ResourcesUpdatedAt).Seconds()
 
@@ -294,11 +298,13 @@ func minInt(a, b int) int {
 	return b
 }
 
-func calculatePenaltyFactor(buildings []Building) (netEnergyPerMin int, efficiency float64) {
+func calculatePenaltyFactor(buildings []Building, energyTechLevel int) (netEnergyPerMin int, efficiency float64) {
 	var totalProd, totalCons float64
 	for _, b := range buildings {
 		if b.Type == "solar_plant" {
 			totalProd += productionRate("solar_plant", b.Level)
+		} else if b.Type == "fusion_reactor" {
+			totalProd += fusionEnergyOutput(b.Level, energyTechLevel)
 		} else {
 			totalCons += energyConsumptionPerMinute(b.Type, b.Level)
 		}
@@ -343,7 +349,7 @@ func productionRateForLevel(buildingType string, level float64) float64 {
 	return base + fract*(next-base)
 }
 
-func (s *PlanetService) calculateProduction(buildings []Building, efficiency float64, planetType string, temperature int) Production {
+func (s *PlanetService) calculateProduction(buildings []Building, efficiency float64, planetType string, temperature int, energyTechLevel int) Production {
 	levels := make(map[string]int)
 	for _, b := range buildings {
 		levels[b.Type] = b.Level
@@ -359,11 +365,25 @@ func (s *PlanetService) calculateProduction(buildings []Building, efficiency flo
 		solarLevel += 1.5
 	}
 
+	gasProduction := productionRateForLevel("gas_mine", gasLevel) / 60.0 * efficiency
+
+	fusionConsumption := 0.0
+	fusionEnergy := 0.0
+	if levels["fusion_reactor"] >= 1 {
+		fusionConsumption = fusionGasConsumption(levels["fusion_reactor"]) / 60.0
+		fusionEnergy = fusionEnergyOutput(levels["fusion_reactor"], energyTechLevel) / 60.0
+	}
+
+	netGas := gasProduction - fusionConsumption
+	if netGas < 0 {
+		netGas = 0
+	}
+
 	return Production{
 		Metal:   productionRate("metal_mine", levels["metal_mine"]) / 60.0 * efficiency,
 		Crystal: productionRate("crystal_mine", levels["crystal_mine"]) / 60.0 * efficiency,
-		Gas:     productionRateForLevel("gas_mine", gasLevel) / 60.0 * efficiency,
-		Energy:  productionRateForLevel("solar_plant", solarLevel) / 60.0,
+		Gas:     netGas,
+		Energy:  productionRateForLevel("solar_plant", solarLevel)/60.0 + fusionEnergy,
 	}
 }
 
@@ -402,6 +422,21 @@ func storageCapacity(buildingType string, level int) int {
 		return baseStorage
 	}
 	return baseStorage + int(5000*math.Pow(1.5, float64(level)))
+}
+
+func fusionEnergyOutput(level, energyTechLevel int) float64 {
+	if level < 1 {
+		return 0
+	}
+	base := math.Round(50 * float64(level) * math.Pow(1.1, float64(level)) * 100) / 100
+	return base * (1 + 0.05*float64(energyTechLevel))
+}
+
+func fusionGasConsumption(level int) float64 {
+	if level < 1 {
+		return 0
+	}
+	return math.Round(10 * float64(level) * math.Pow(1.1, float64(level)) * 100) / 100
 }
 
 func planetTypeAndTemp(position int) (typ string, temperature int) {

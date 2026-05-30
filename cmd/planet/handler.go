@@ -44,8 +44,14 @@ func (h *Handler) GetMyPlanet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	netEnergy, efficiency := calculatePenaltyFactor(buildings)
-	prod := h.service.calculateProduction(buildings, efficiency, planet.Type, planet.Temperature)
+	energyTechLevel, err := h.service.repo.GetTechLevel(r.Context(), planet.UserID, "energy_tech")
+	if err != nil {
+		slog.Error("get tech level failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	netEnergy, efficiency := calculatePenaltyFactor(buildings, energyTechLevel)
+	prod := h.service.calculateProduction(buildings, efficiency, planet.Type, planet.Temperature, energyTechLevel)
 	storage := h.service.calculateStorage(buildings)
 	planet.Energy = netEnergy
 	resp := toPlanetResponse(planet, buildings, prod, storage, queue)
