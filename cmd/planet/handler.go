@@ -51,7 +51,17 @@ func (h *Handler) GetMyPlanet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	netEnergy, efficiency := calculatePenaltyFactor(buildings, energyTechLevel)
-	prod := h.service.calculateProduction(buildings, efficiency, planet.Type, planet.Temperature, energyTechLevel)
+	vipPoints, totalResources, err := h.service.repo.GetPlayerProgress(r.Context(), planet.ID)
+	if err != nil {
+		slog.Error("get player progress failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	vipLevel := vipLevelFromPoints(vipPoints)
+	rank := rankFromResources(totalResources)
+	vipBonus := vipProductionBonus(vipLevel)
+	rankBonus := rankProductionBonus(rank)
+	prod := h.service.calculateProduction(buildings, efficiency, planet.Type, planet.Temperature, energyTechLevel, vipBonus, rankBonus)
 	storage := h.service.calculateStorage(buildings)
 	planet.Energy = netEnergy
 	resp := toPlanetResponse(planet, buildings, prod, storage, queue)

@@ -58,8 +58,16 @@ func (s *PlanetService) GetOrCreatePlanet(ctx context.Context, userID int) (Plan
 	if err != nil {
 		return Planet{}, nil, err
 	}
+	vipPoints, totalResources, err := s.repo.GetPlayerProgress(ctx, planet.ID)
+	if err != nil {
+		return Planet{}, nil, err
+	}
+	vipLevel := vipLevelFromPoints(vipPoints)
+	rank := rankFromResources(totalResources)
+	vipBonus := vipProductionBonus(vipLevel)
+	rankBonus := rankProductionBonus(rank)
 	netEnergy, efficiency := calculatePenaltyFactor(buildings, energyTechLevel)
-	prod := s.calculateProduction(buildings, efficiency, planet.Type, planet.Temperature, energyTechLevel)
+	prod := s.calculateProduction(buildings, efficiency, planet.Type, planet.Temperature, energyTechLevel, vipBonus, rankBonus)
 	storage := s.calculateStorage(buildings)
 	elapsed := time.Since(planet.ResourcesUpdatedAt).Seconds()
 
@@ -364,7 +372,7 @@ func productionRateForLevel(buildingType string, level float64) float64 {
 	return base + fract*(next-base)
 }
 
-func (s *PlanetService) calculateProduction(buildings []Building, efficiency float64, planetType string, temperature int, energyTechLevel int) Production {
+func (s *PlanetService) calculateProduction(buildings []Building, efficiency float64, planetType string, temperature int, energyTechLevel int, vipBonus float64, rankBonus float64) Production {
 	levels := make(map[string]int)
 	for _, b := range buildings {
 		levels[b.Type] = b.Level
@@ -394,9 +402,10 @@ func (s *PlanetService) calculateProduction(buildings []Building, efficiency flo
 		netGas = 0
 	}
 
+	totalBonus := 1 + vipBonus + rankBonus
 	return Production{
-		Metal:   productionRate("metal_mine", levels["metal_mine"]) / 60.0 * efficiency,
-		Crystal: productionRate("crystal_mine", levels["crystal_mine"]) / 60.0 * efficiency,
+		Metal:   productionRate("metal_mine", levels["metal_mine"]) / 60.0 * efficiency * totalBonus,
+		Crystal: productionRate("crystal_mine", levels["crystal_mine"]) / 60.0 * efficiency * totalBonus,
 		Gas:     netGas,
 		Energy:  productionRateForLevel("solar_plant", solarLevel)/60.0 + fusionEnergy,
 	}

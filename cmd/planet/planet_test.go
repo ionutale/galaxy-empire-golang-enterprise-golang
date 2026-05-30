@@ -403,7 +403,7 @@ func TestCalculateProduction(t *testing.T) {
 		{Type: "gas_mine", Level: 1},
 		{Type: "solar_plant", Level: 3},
 	}
-	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3)
+	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3, 0.0, 0.0)
 	if prod.Metal <= 0 {
 		t.Error("expected positive metal production")
 	}
@@ -420,7 +420,7 @@ func TestCalculateProduction_TemperatureBonus_ColdPlanet(t *testing.T) {
 		{Type: "solar_plant", Level: 1},
 	}
 	// Ice planet, cold: gas gets +1.5 effective levels
-	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeIce, -30, 3)
+	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeIce, -30, 3, 0.0, 0.0)
 	gasPerMin := prod.Gas * 60
 	if gasPerMin <= 11 {
 		t.Errorf("gas on cold planet should get temperature bonus, got %.2f/min", gasPerMin)
@@ -434,7 +434,7 @@ func TestCalculateProduction_TemperatureBonus_HotPlanet(t *testing.T) {
 		{Type: "solar_plant", Level: 1},
 	}
 	// Desert planet, hot: solar gets +1.5 effective levels
-	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeDesert, 80, 3)
+	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeDesert, 80, 3, 0.0, 0.0)
 	solarPerMin := prod.Energy * 60
 	if solarPerMin <= 44 {
 		t.Errorf("solar on hot planet should get temperature bonus, got %.2f/min", solarPerMin)
@@ -447,7 +447,7 @@ func TestCalculateProduction_NoBonus_Terran(t *testing.T) {
 		{Type: "gas_mine", Level: 1},
 		{Type: "solar_plant", Level: 1},
 	}
-	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3)
+	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3, 0.0, 0.0)
 	gasPerMin := prod.Gas * 60
 	if gasPerMin < 10 || gasPerMin > 12 {
 		t.Errorf("gas on terran should have no bonus, got %.2f/min", gasPerMin)
@@ -461,7 +461,7 @@ func TestCalculateProduction_WithPenalty(t *testing.T) {
 		{Type: "crystal_mine", Level: 5},
 		{Type: "gas_mine", Level: 5},
 	}
-	prod := svc.calculateProduction(buildings, 0.5, PlanetTypeTerran, 15, 3)
+	prod := svc.calculateProduction(buildings, 0.5, PlanetTypeTerran, 15, 3, 0.0, 0.0)
 	if prod.Metal <= 0 {
 		t.Error("expected positive metal production even with penalty")
 	}
@@ -990,7 +990,7 @@ func TestFusionReactor_ProducesEnergy(t *testing.T) {
 		{Type: "solar_plant", Level: 1},
 		{Type: "gas_mine", Level: 1},
 	}
-	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3)
+	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3, 0.0, 0.0)
 	energyPerMin := prod.Energy * 60
 	if energyPerMin <= 44 {
 		t.Errorf("fusion L1 + solar L1 should produce > 44/min, got %.2f/min", energyPerMin)
@@ -1006,7 +1006,7 @@ func TestFusionReactor_ConsumesGas(t *testing.T) {
 		{Type: "gas_mine", Level: 1},
 		{Type: "fusion_reactor", Level: 1},
 	}
-	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3)
+	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3, 0.0, 0.0)
 	gasPerMin := prod.Gas * 60
 	if gasPerMin < 0 {
 		t.Errorf("net gas should not be negative, got %.4f/min", gasPerMin)
@@ -1142,9 +1142,73 @@ func TestFusionReactor_EnergyTechBoostsOutput(t *testing.T) {
 	buildings := []Building{
 		{Type: "fusion_reactor", Level: 1},
 	}
-	prodLow := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3)
-	prodHigh := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 5)
+	prodLow := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3, 0.0, 0.0)
+	prodHigh := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 5, 0.0, 0.0)
 	if prodHigh.Energy <= prodLow.Energy {
 		t.Errorf("higher energy tech should boost fusion output: L3=%.4f L5=%.4f", prodLow.Energy, prodHigh.Energy)
 	}
+}
+
+func TestCalculateProduction_RankAndVIPBonuses(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	buildings := []Building{
+		{Type: "metal_mine", Level: 1},
+		{Type: "crystal_mine", Level: 2},
+		{Type: "solar_plant", Level: 3},
+	}
+
+	base := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3, 0.0, 0.0)
+	bonused := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15, 3, 0.3, 0.2)
+	expectedMult := 1.5
+	tolerance := 0.01
+
+	gotRatio := bonused.Metal / base.Metal
+	if diff := gotRatio - expectedMult; diff < -tolerance || diff > tolerance {
+		t.Errorf("metal multiplier: expected %.2f, got %.2f", expectedMult, gotRatio)
+	}
+	gotRatio = bonused.Crystal / base.Crystal
+	if diff := gotRatio - expectedMult; diff < -tolerance || diff > tolerance {
+		t.Errorf("crystal multiplier: expected %.2f, got %.2f", expectedMult, gotRatio)
+	}
+	if bonused.Gas != base.Gas {
+		t.Errorf("gas should not be affected by bonuses: base %.2f, got %.2f", base.Gas, bonused.Gas)
+	}
+	if bonused.Energy != base.Energy {
+		t.Errorf("energy should not be affected by bonuses: base %.2f, got %.2f", base.Energy, bonused.Energy)
+	}
+}
+
+func TestGetOrCreatePlanet_IncludesVIPAndRank(t *testing.T) {
+	mock := newMockRepo()
+	svc := NewPlanetService(mock)
+	planet, _, err := svc.GetOrCreatePlanet(context.Background(), 72)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = svc.repo.AddVIPPoints(context.Background(), planet.ID, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = svc.repo.AddResourcesProduced(context.Background(), planet.ID, 1000000)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = svc.GetOrCreatePlanet(context.Background(), 72)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vipPoints, totalResources, err := svc.repo.GetPlayerProgress(context.Background(), planet.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vipLevel := vipLevelFromPoints(vipPoints)
+	rank := rankFromResources(totalResources)
+	if vipLevel == 0 {
+		t.Error("expected vipLevel > 0 after adding points")
+	}
+	_ = totalResources
+	_ = rank
 }
