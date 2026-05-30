@@ -29,6 +29,7 @@ type Repository interface {
 	DeleteBuilding(ctx context.Context, planetID int, buildingType string) error
 	UpdateBuildingLevel(ctx context.Context, planetID int, buildingType string, level int) error
 	DeconstructComplete(ctx context.Context, planetID, queueID int, buildingType string, targetLevel int, refundMetal, refundCrystal, refundGas, maxFields int) error
+	GetTechLevel(ctx context.Context, userID int, techType string) (int, error)
 }
 
 type PostgresRepository struct {
@@ -333,6 +334,21 @@ func (r *PostgresRepository) DeconstructComplete(ctx context.Context, planetID, 
 	}
 
 	return tx.Commit(ctx)
+}
+
+func (r *PostgresRepository) GetTechLevel(ctx context.Context, userID int, techType string) (int, error) {
+	var level int
+	err := r.pool.QueryRow(ctx,
+		`SELECT level FROM planet.player_technologies WHERE user_id = $1 AND type = $2`,
+		userID, techType,
+	).Scan(&level)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return level, nil
 }
 
 func (r *PostgresRepository) CompleteBuild(ctx context.Context, queueID int, buildingType string, targetLevel int) error {

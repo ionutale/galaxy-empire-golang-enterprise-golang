@@ -216,6 +216,13 @@ func (m *mockRepo) UpdateBuildingLevel(_ context.Context, planetID int, building
 	return nil
 }
 
+func (m *mockRepo) GetTechLevel(_ context.Context, userID int, techType string) (int, error) {
+	if techType == "energy_tech" {
+		return 3, nil
+	}
+	return 0, nil
+}
+
 func (m *mockRepo) CompleteBuild(_ context.Context, queueID int, buildingType string, targetLevel int) error {
 	for pid, entries := range m.queue {
 		for i, q := range entries {
@@ -231,6 +238,17 @@ func (m *mockRepo) CompleteBuild(_ context.Context, queueID int, buildingType st
 		}
 	}
 	return nil
+}
+
+func TestGetTechLevel_Default(t *testing.T) {
+	mock := newMockRepo()
+	level, err := mock.GetTechLevel(context.Background(), 1, "energy_tech")
+	if err != nil {
+		t.Fatal("expected no error, got:", err)
+	}
+	if level != 3 {
+		t.Errorf("expected energy_tech level 3, got %d", level)
+	}
 }
 
 func TestPlanetTypeAndTemp_HomePlanet(t *testing.T) {

@@ -47,6 +47,12 @@ type QueueEntry struct {
 	CompletesAt  time.Time `json:"completes_at"`
 }
 
+type Technology struct {
+	ID    int
+	Type  string
+	Level int
+}
+
 type PlanetResponse struct {
 	ID         int          `json:"id"`
 	UserID     int          `json:"user_id"`

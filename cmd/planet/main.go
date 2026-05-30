@@ -164,10 +164,34 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.player_technologies (
+			id SERIAL PRIMARY KEY,
+			user_id INTEGER NOT NULL REFERENCES planet.planets(user_id) ON DELETE CASCADE,
+			type VARCHAR(50) NOT NULL,
+			level INTEGER NOT NULL DEFAULT 0,
+			UNIQUE(user_id, type)
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO planet.player_technologies (user_id, type, level)
+		SELECT p.user_id, 'energy_tech', 3
+		FROM planet.planets p
+		WHERE NOT EXISTS (
+			SELECT 1 FROM planet.player_technologies t
+			WHERE t.user_id = p.user_id AND t.type = 'energy_tech'
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
 		INSERT INTO planet.buildings (planet_id, type, level)
 		SELECT p.id, btype, 1
 		FROM planet.planets p
-		CROSS JOIN (VALUES ('robotics_factory'), ('nanite_factory'), ('terraformer')) AS t(btype)
+		CROSS JOIN (VALUES ('robotics_factory'), ('nanite_factory'), ('terraformer'), ('fusion_reactor')) AS t(btype)
 		WHERE NOT EXISTS (
 			SELECT 1 FROM planet.buildings b
 			WHERE b.planet_id = p.id AND b.type = t.btype
