@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -1237,4 +1240,80 @@ func TestGetOrCreatePlanet_IncludesVIPAndRank(t *testing.T) {
 	}
 	_ = totalResources
 	_ = rank
+}
+
+func TestListGalaxies(t *testing.T) {
+	mock := newMockRepo()
+	galaxies, err := mock.ListGalaxies(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(galaxies) != 9 {
+		t.Errorf("expected 9 galaxies, got %d", len(galaxies))
+	}
+	if galaxies[0].Name != "Galaxy 1" {
+		t.Errorf("expected Galaxy 1, got %s", galaxies[0].Name)
+	}
+}
+
+func TestGetSystemPositions_Mock(t *testing.T) {
+	mock := newMockRepo()
+	positions, err := mock.GetSystemPositions(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(positions) != 15 {
+		t.Errorf("expected 15 positions, got %d", len(positions))
+	}
+	for i, pos := range positions {
+		if pos.PositionNum != i+1 {
+			t.Errorf("position %d: expected num %d, got %d", i, i+1, pos.PositionNum)
+		}
+		if pos.State != "empty" {
+			t.Errorf("position %d: expected empty, got %s", i, pos.State)
+		}
+	}
+}
+
+func TestHandler_ListGalaxies(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	h := NewHandler(svc)
+
+	req := httptest.NewRequest("GET", "/api/galaxy", nil)
+	w := httptest.NewRecorder()
+	h.ListGalaxies(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var galaxies []Galaxy
+	if err := json.NewDecoder(w.Body).Decode(&galaxies); err != nil {
+		t.Fatal(err)
+	}
+	if len(galaxies) != 9 {
+		t.Errorf("expected 9 galaxies, got %d", len(galaxies))
+	}
+}
+
+func TestHandler_ListSystems_InvalidGalaxy(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	h := NewHandler(svc)
+	req := httptest.NewRequest("GET", "/api/galaxy/systems/abc", nil)
+	w := httptest.NewRecorder()
+	h.ListSystems(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid galaxy ID, got %d", w.Code)
+	}
+}
+
+func TestHandler_GetPositions_InvalidSystem(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	h := NewHandler(svc)
+	req := httptest.NewRequest("GET", "/api/galaxy/positions/abc", nil)
+	w := httptest.NewRecorder()
+	h.GetPositions(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid system ID, got %d", w.Code)
+	}
 }
