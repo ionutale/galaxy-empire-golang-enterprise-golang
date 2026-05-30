@@ -35,3 +35,7 @@ pgdata/
 # Environment
 .env
 .env.local
+planet/
+auth/
+gateway/
+
