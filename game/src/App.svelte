@@ -84,6 +84,7 @@
       gas_storage: 'Gas Storage',
       robotics_factory: 'Robotics Facility', nanite_factory: 'Nanite Factory',
       terraformer: 'Terraformer',
+      fusion_reactor: 'Fusion Reactor',
     }
     return labels[type] || type
   }
@@ -101,6 +102,7 @@
       case 'robotics_factory': return { metal: Math.floor(400 * Math.pow(2, next)), crystal: Math.floor(120 * Math.pow(2, next)), gas: Math.floor(200 * Math.pow(2, next)) }
       case 'nanite_factory': return { metal: Math.floor(1000000 * Math.pow(2, next)), crystal: Math.floor(500000 * Math.pow(2, next)), gas: Math.floor(100000 * Math.pow(2, next)) }
       case 'terraformer': return { metal: Math.floor(50000 * Math.pow(2, next)), crystal: Math.floor(50000 * Math.pow(2, next)), gas: Math.floor(50000 * Math.pow(2, next)) }
+      case 'fusion_reactor': return { metal: Math.floor(200 * Math.pow(2, next)), crystal: Math.floor(150 * Math.pow(2, next)), gas: Math.floor(50 * Math.pow(2, next)) }
     }
     return { metal: 0, crystal: 0, gas: 0 }
   }
