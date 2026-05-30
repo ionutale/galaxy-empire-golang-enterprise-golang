@@ -21,12 +21,9 @@ func setupRouter(h *Handler) http.Handler {
 }
 
 func TestGetMyPlanet_NoUserID(t *testing.T) {
-	h := setupHandler()
-	router := setupRouter(h)
-
 	req := httptest.NewRequest("GET", "/api/planet/mine", nil)
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
+	setupRouter(setupHandler()).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", rec.Code)
@@ -34,27 +31,27 @@ func TestGetMyPlanet_NoUserID(t *testing.T) {
 }
 
 func TestGetMyPlanet_WithUserID(t *testing.T) {
-	h := setupHandler()
-	router := setupRouter(h)
-
 	req := httptest.NewRequest("GET", "/api/planet/mine", nil)
 	req.Header.Set("X-User-ID", "7")
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
+	setupRouter(setupHandler()).ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var p Planet
-	if err := json.NewDecoder(rec.Body).Decode(&p); err != nil {
-		t.Fatal("decode planet:", err)
+	var resp PlanetResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatal("decode response:", err)
 	}
-	if p.UserID != 7 {
-		t.Errorf("expected user_id 7, got %d", p.UserID)
+	if resp.UserID != 7 {
+		t.Errorf("expected user_id 7, got %d", resp.UserID)
 	}
-	if p.Metal == 0 {
-		t.Error("expected non-zero metal")
+	if len(resp.Buildings) != 4 {
+		t.Errorf("expected 4 buildings, got %d", len(resp.Buildings))
+	}
+	if resp.Production.Metal <= 0 {
+		t.Error("expected positive metal production")
 	}
 }
 
@@ -62,17 +59,17 @@ func TestGetMyPlanet_SameUserReturnsSamePlanet(t *testing.T) {
 	h := setupHandler()
 	router := setupRouter(h)
 
+	rec1 := httptest.NewRecorder()
 	req1 := httptest.NewRequest("GET", "/api/planet/mine", nil)
 	req1.Header.Set("X-User-ID", "10")
-	rec1 := httptest.NewRecorder()
 	router.ServeHTTP(rec1, req1)
 
+	rec2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest("GET", "/api/planet/mine", nil)
 	req2.Header.Set("X-User-ID", "10")
-	rec2 := httptest.NewRecorder()
 	router.ServeHTTP(rec2, req2)
 
-	var p1, p2 Planet
+	var p1, p2 PlanetResponse
 	json.NewDecoder(rec1.Body).Decode(&p1)
 	json.NewDecoder(rec2.Body).Decode(&p2)
 

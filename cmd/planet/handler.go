@@ -27,14 +27,16 @@ func (h *Handler) GetMyPlanet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	planet, err := h.service.GetOrCreatePlanet(r.Context(), userID)
+	planet, buildings, err := h.service.GetOrCreatePlanet(r.Context(), userID)
 	if err != nil {
-		slog.Error("get or create planet failed", "error", err)
+		slog.Error("get planet failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, planet)
+	prod := h.service.calculateProduction(buildings)
+	resp := toPlanetResponse(planet, buildings, prod)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

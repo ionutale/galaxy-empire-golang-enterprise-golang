@@ -77,7 +77,7 @@ func getEnv(key, fallback string) string {
 }
 
 func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := pool.Exec(ctx, `
+	if _, err := pool.Exec(ctx, `
 		CREATE SCHEMA IF NOT EXISTS planet;
 		CREATE TABLE IF NOT EXISTS planet.planets (
 			id SERIAL PRIMARY KEY,
@@ -90,9 +90,32 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			crystal INTEGER NOT NULL DEFAULT 300,
 			gas INTEGER NOT NULL DEFAULT 200,
 			energy INTEGER NOT NULL DEFAULT 50,
+			resources_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);
-	`)
-	return err
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		ALTER TABLE planet.planets
+		ADD COLUMN IF NOT EXISTS resources_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.buildings (
+			id SERIAL PRIMARY KEY,
+			planet_id INTEGER NOT NULL REFERENCES planet.planets(id) ON DELETE CASCADE,
+			type VARCHAR(50) NOT NULL,
+			level INTEGER NOT NULL DEFAULT 0,
+			UNIQUE(planet_id, type)
+		);
+	`); err != nil {
+		return err
+	}
+
+	return nil
 }
