@@ -6,6 +6,7 @@
   let password = ''
   let mode = 'login'
   let error = ''
+  let upgrading = null
 
   async function handleSubmit() {
     error = ''
@@ -63,8 +64,59 @@
     const labels = {
       metal_mine: 'Metal Mine', crystal_mine: 'Crystal Mine',
       gas_mine: 'Gas Mine', solar_plant: 'Solar Plant',
+      metal_storage: 'Metal Storage', crystal_storage: 'Crystal Storage',
+      gas_storage: 'Gas Storage',
+      robotics_factory: 'Robotics Facility', nanite_factory: 'Nanite Factory',
     }
     return labels[type] || type
+  }
+
+  function buildingCost(type, level) {
+    const next = level + 1
+    switch (type) {
+      case 'metal_mine': return { metal: Math.floor(60 * Math.pow(1.5, next)), crystal: Math.floor(15 * Math.pow(1.5, next)), gas: 0 }
+      case 'crystal_mine': return { metal: Math.floor(48 * Math.pow(1.6, next)), crystal: Math.floor(24 * Math.pow(1.6, next)), gas: 0 }
+      case 'gas_mine': return { metal: Math.floor(225 * Math.pow(1.5, next)), crystal: Math.floor(75 * Math.pow(1.5, next)), gas: 0 }
+      case 'solar_plant': return { metal: Math.floor(75 * Math.pow(1.5, next)), crystal: Math.floor(30 * Math.pow(1.5, next)), gas: 0 }
+      case 'metal_storage': return { metal: Math.floor(1000 * Math.pow(2, next)), crystal: 0, gas: 0 }
+      case 'crystal_storage': return { metal: Math.floor(1000 * Math.pow(2, next)), crystal: 0, gas: 0 }
+      case 'gas_storage': return { metal: Math.floor(1000 * Math.pow(2, next)), crystal: 0, gas: 0 }
+      case 'robotics_factory': return { metal: Math.floor(400 * Math.pow(2, next)), crystal: Math.floor(120 * Math.pow(2, next)), gas: Math.floor(200 * Math.pow(2, next)) }
+      case 'nanite_factory': return { metal: Math.floor(1000000 * Math.pow(2, next)), crystal: Math.floor(500000 * Math.pow(2, next)), gas: Math.floor(100000 * Math.pow(2, next)) }
+    }
+    return { metal: 0, crystal: 0, gas: 0 }
+  }
+
+  function canAfford(type, level) {
+    if (!planet) return false
+    const cost = buildingCost(type, level)
+    return planet.metal >= cost.metal && planet.crystal >= (cost.crystal || 0) && planet.gas >= (cost.gas || 0)
+  }
+
+  function isQueued(type) {
+    return planet && planet.queue && planet.queue.some(q => q.building_type === type)
+  }
+
+  function toggleUpgrade(building) {
+    if (isQueued(building.type)) return
+    if (upgrading === building.type) { upgrading = null; return }
+    upgrading = building.type
+  }
+
+  async function startUpgrade(type) {
+    try {
+      const res = await fetch(`/api/buildings/${type}/upgrade`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        error = data.error || 'Upgrade failed'
+        return
+      }
+      upgrading = null
+      await loadPlanet()
+    } catch (e) { error = e.message }
   }
 </script>
 
@@ -115,12 +167,58 @@
           </div>
         </div>
 
+        {#if planet.queue && planet.queue.length > 0}
+          <div class="queue">
+            <h2>Construction</h2>
+            {#each planet.queue as entry}
+              <div class="queue-item">
+                <span class="qname">{buildingLabel(entry.building_type)}</span>
+                <span class="qlevel">Lv.{entry.target_level}</span>
+                <span class="qtime">{(new Date(entry.completes_at) - new Date()) / 1000 > 0 ? Math.ceil((new Date(entry.completes_at) - new Date()) / 1000) + 's' : 'Complete'}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+
         <div class="buildings">
           <h2>Buildings</h2>
           {#each planet.buildings as building}
-            <div class="building">
-              <span class="bname">{buildingLabel(building.type)}</span>
-              <span class="blevel">Lv.{building.level}</span>
+            {@const cost = buildingCost(building.type, building.level)}
+            <div class="building" class:queued={isQueued(building.type)}>
+              <div class="b-info">
+                <span class="bname">{buildingLabel(building.type)}</span>
+                <span class="blevel">Lv.{building.level}</span>
+              </div>
+              <div class="b-actions">
+                {#if upgrading === building.type}
+                  <div class="cost-card">
+                    <div class="cost-row">
+                      <span class="cost-icon metal-icon">M</span>
+                      <span class="cost-val" class:insufficient={planet.metal < cost.metal}>{cost.metal}</span>
+                    </div>
+                    {#if cost.crystal > 0}
+                      <div class="cost-row">
+                        <span class="cost-icon crystal-icon">C</span>
+                        <span class="cost-val" class:insufficient={planet.crystal < cost.crystal}>{cost.crystal}</span>
+                      </div>
+                    {/if}
+                    {#if cost.gas > 0}
+                      <div class="cost-row">
+                        <span class="cost-icon gas-icon">G</span>
+                        <span class="cost-val" class:insufficient={planet.gas < cost.gas}>{cost.gas}</span>
+                      </div>
+                    {/if}
+                    <div class="cost-actions">
+                      <button class="btn-confirm" disabled={!canAfford(building.type, building.level)} on:click={() => startUpgrade(building.type)}>Upgrade</button>
+                      <button class="btn-cancel" on:click={() => { upgrading = null }}>X</button>
+                    </div>
+                  </div>
+                {:else if !isQueued(building.type)}
+                  <button class="btn-upgrade" on:click={() => toggleUpgrade(building)}>+</button>
+                {:else}
+                  <span class="q-badge">Build</span>
+                {/if}
+              </div>
             </div>
           {/each}
         </div>
@@ -218,13 +316,65 @@
   .crystal .storage-bar .fill { background: #2a3a6a; }
   .gas .storage-bar .fill { background: #3a5a3a; }
 
+  .queue { margin-top: 1.5rem; }
+  .queue h2 { font-size: 0.9rem; color: #8a9ab5; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .queue-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.5rem 0.75rem; background: #1a2830; border: 1px solid #1a3a3a;
+    border-radius: 6px; margin-bottom: 0.5rem;
+  }
+  .qname { font-size: 0.85rem; color: #74c8d4; }
+  .qlevel { font-size: 0.8rem; color: #5a8a9a; }
+  .qtime { font-size: 0.8rem; color: #5aaa5a; font-family: monospace; }
+  .q-badge {
+    font-size: 0.65rem; background: #1a3a3a; color: #5aaa5a;
+    padding: 0.15rem 0.4rem; border-radius: 3px; text-transform: uppercase;
+  }
+
   .buildings { margin-top: 1.5rem; }
   .buildings h2 { font-size: 0.9rem; color: #8a9ab5; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
   .building {
-    display: flex; justify-content: space-between; padding: 0.5rem 0.75rem;
-    background: #1a2340; border: 1px solid #243050; border-radius: 6px;
-    margin-bottom: 0.5rem;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.5rem 0.75rem; background: #1a2340; border: 1px solid #243050; border-radius: 6px;
+    margin-bottom: 0.5rem; position: relative;
   }
+  .building.queued { opacity: 0.5; border-color: #1a3a3a; }
+  .b-info { display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; }
   .bname { font-size: 0.85rem; }
-  .blevel { font-size: 0.85rem; color: #8a9ab5; }
+  .blevel { font-size: 0.75rem; color: #5a7a9a; }
+  .b-actions { display: flex; align-items: center; gap: 0.5rem; }
+  .btn-upgrade {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #2a4a3a; border: 1px solid #3a6a4a;
+    color: #5aaa5a; font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .btn-upgrade:hover { background: #3a5a4a; }
+  .cost-card {
+    position: absolute; top: 100%; right: 0; z-index: 10;
+    background: #1a2840; border: 1px solid #2a4a6a; border-radius: 8px;
+    padding: 0.5rem 0.75rem; display: flex; flex-direction: column; gap: 0.25rem;
+    min-width: 120px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .cost-row { display: flex; align-items: center; gap: 0.35rem; }
+  .cost-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%; font-size: 0.6rem; font-weight: 700;
+  }
+  .metal-icon { background: #5a3a1a; color: #d4a574; }
+  .crystal-icon { background: #1a3a5a; color: #74a8d4; }
+  .gas-icon { background: #1a4a3a; color: #74d4a8; }
+  .cost-val { font-size: 0.8rem; color: #c8d6e5; }
+  .cost-val.insufficient { color: #d47474; }
+  .cost-actions { display: flex; gap: 0.35rem; margin-top: 0.35rem; }
+  .btn-confirm {
+    flex: 1; padding: 0.3rem 0.5rem; background: #2a5a3a; border: none;
+    border-radius: 4px; color: #a8e8a8; font-size: 0.75rem; cursor: pointer;
+  }
+  .btn-confirm:hover:not(:disabled) { background: #3a6a4a; }
+  .btn-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-cancel {
+    padding: 0.3rem 0.5rem; background: #4a2020; border: none;
+    border-radius: 4px; color: #d47474; font-size: 0.75rem; cursor: pointer;
+  }
+  .btn-cancel:hover { background: #5a3030; }
 </style>

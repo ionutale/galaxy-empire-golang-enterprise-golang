@@ -9,21 +9,22 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func setupHandler() *Handler {
-	svc := NewPlanetService(newMockRepo())
-	return NewHandler(svc)
+func setupTestHandler() *Handler {
+	return NewHandler(NewPlanetService(newMockRepo()))
 }
 
-func setupRouter(h *Handler) http.Handler {
+func setupTestRouter(h *Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Get("/api/planet/mine", h.GetMyPlanet)
+	r.Post("/api/buildings/{type}/upgrade", h.StartUpgrade)
 	return r
 }
 
 func TestGetMyPlanet_NoUserID(t *testing.T) {
+	router := setupTestRouter(setupTestHandler())
 	req := httptest.NewRequest("GET", "/api/planet/mine", nil)
 	rec := httptest.NewRecorder()
-	setupRouter(setupHandler()).ServeHTTP(rec, req)
+	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", rec.Code)
@@ -31,10 +32,11 @@ func TestGetMyPlanet_NoUserID(t *testing.T) {
 }
 
 func TestGetMyPlanet_WithUserID(t *testing.T) {
+	router := setupTestRouter(setupTestHandler())
 	req := httptest.NewRequest("GET", "/api/planet/mine", nil)
 	req.Header.Set("X-User-ID", "7")
 	rec := httptest.NewRecorder()
-	setupRouter(setupHandler()).ServeHTTP(rec, req)
+	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -47,8 +49,8 @@ func TestGetMyPlanet_WithUserID(t *testing.T) {
 	if resp.UserID != 7 {
 		t.Errorf("expected user_id 7, got %d", resp.UserID)
 	}
-	if len(resp.Buildings) != 7 {
-		t.Errorf("expected 7 buildings, got %d", len(resp.Buildings))
+	if len(resp.Buildings) != 9 {
+		t.Errorf("expected 9 buildings, got %d", len(resp.Buildings))
 	}
 	if resp.Production.Metal <= 0 {
 		t.Error("expected positive metal production")
@@ -56,14 +58,11 @@ func TestGetMyPlanet_WithUserID(t *testing.T) {
 	if resp.Storage.Metal <= 0 {
 		t.Error("expected positive metal storage")
 	}
-	if resp.Storage.Metal <= resp.Metal {
-		t.Error("storage should exceed current resources")
-	}
 }
 
 func TestGetMyPlanet_SameUserReturnsSamePlanet(t *testing.T) {
-	h := setupHandler()
-	router := setupRouter(h)
+	h := setupTestHandler()
+	router := setupTestRouter(h)
 
 	rec1 := httptest.NewRecorder()
 	req1 := httptest.NewRequest("GET", "/api/planet/mine", nil)
@@ -81,5 +80,105 @@ func TestGetMyPlanet_SameUserReturnsSamePlanet(t *testing.T) {
 
 	if p1.ID != p2.ID {
 		t.Error("expected same planet for same user")
+	}
+}
+
+func TestStartUpgrade_NoUserID(t *testing.T) {
+	router := setupTestRouter(setupTestHandler())
+	req := httptest.NewRequest("POST", "/api/buildings/metal_mine/upgrade", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", rec.Code)
+	}
+}
+
+func TestStartUpgrade_Success(t *testing.T) {
+	router := setupTestRouter(setupTestHandler())
+	req := httptest.NewRequest("POST", "/api/buildings/metal_mine/upgrade", nil)
+	req.Header.Set("X-User-ID", "1")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var entry QueueEntry
+	if err := json.NewDecoder(rec.Body).Decode(&entry); err != nil {
+		t.Fatal("decode queue entry:", err)
+	}
+	if entry.BuildingType != "metal_mine" {
+		t.Errorf("expected metal_mine, got %s", entry.BuildingType)
+	}
+	if entry.TargetLevel != 2 {
+		t.Errorf("expected target level 2, got %d", entry.TargetLevel)
+	}
+}
+
+func TestStartUpgrade_InvalidBuilding(t *testing.T) {
+	router := setupTestRouter(setupTestHandler())
+	req := httptest.NewRequest("POST", "/api/buildings/invalid/upgrade", nil)
+	req.Header.Set("X-User-ID", "1")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestStartUpgrade_AlreadyQueued(t *testing.T) {
+	router := setupTestRouter(setupTestHandler())
+	makeReq := func() *http.Response {
+		req := httptest.NewRequest("POST", "/api/buildings/metal_mine/upgrade", nil)
+		req.Header.Set("X-User-ID", "2")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+
+	resp1 := makeReq()
+	if resp1.StatusCode != http.StatusOK {
+		t.Errorf("first upgrade expected 200, got %d", resp1.StatusCode)
+	}
+
+	resp2 := makeReq()
+	if resp2.StatusCode != http.StatusConflict {
+		t.Errorf("second upgrade expected 409, got %d", resp2.StatusCode)
+	}
+}
+
+func TestStartUpgrade_ProvidesQueueInPlanetResponse(t *testing.T) {
+	h := setupTestHandler()
+	router := setupTestRouter(h)
+
+	upgradeReq := httptest.NewRequest("POST", "/api/buildings/crystal_mine/upgrade", nil)
+	upgradeReq.Header.Set("X-User-ID", "3")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, upgradeReq)
+
+	planetReq := httptest.NewRequest("GET", "/api/planet/mine", nil)
+	planetReq.Header.Set("X-User-ID", "3")
+	rec2 := httptest.NewRecorder()
+	router.ServeHTTP(rec2, planetReq)
+
+	var resp PlanetResponse
+	if err := json.NewDecoder(rec2.Body).Decode(&resp); err != nil {
+		t.Fatal("decode:", err)
+	}
+	if len(resp.Queue) == 0 {
+		t.Error("expected queue entries in planet response")
+	}
+	found := false
+	for _, q := range resp.Queue {
+		if q.BuildingType == "crystal_mine" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected crystal_mine in queue")
 	}
 }

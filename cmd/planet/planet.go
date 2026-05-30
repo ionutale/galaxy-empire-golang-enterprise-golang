@@ -9,6 +9,10 @@ import (
 
 const baseStorage = 10000
 
+var ErrInsufficientResources = errors.New("insufficient resources")
+var ErrAlreadyQueued = errors.New("building already in queue")
+var ErrInvalidBuilding = errors.New("invalid building type")
+
 type PlanetService struct {
 	repo Repository
 }
@@ -24,6 +28,10 @@ func (s *PlanetService) GetOrCreatePlanet(ctx context.Context, userID int) (Plan
 			return Planet{}, nil, err
 		}
 		return s.repo.Create(ctx, userID)
+	}
+
+	if err := s.processCompletedBuilds(ctx, planet.ID); err != nil {
+		return Planet{}, nil, err
 	}
 
 	buildings, err := s.repo.GetBuildings(ctx, planet.ID)
@@ -50,6 +58,98 @@ func (s *PlanetService) GetOrCreatePlanet(ctx context.Context, userID int) (Plan
 
 	planet.Energy = netEnergy
 	return planet, buildings, nil
+}
+
+func (s *PlanetService) processCompletedBuilds(ctx context.Context, planetID int) error {
+	queue, err := s.repo.GetActiveQueue(ctx, planetID)
+	if err != nil {
+		return err
+	}
+	now := time.Now()
+	for _, q := range queue {
+		if now.After(q.CompletesAt) {
+			if err := s.repo.CompleteBuild(ctx, q.ID, q.BuildingType, q.TargetLevel); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (s *PlanetService) StartBuildingUpgrade(ctx context.Context, planetID int, buildingType string) (QueueEntry, error) {
+	queue, err := s.repo.GetActiveQueue(ctx, planetID)
+	if err != nil {
+		return QueueEntry{}, err
+	}
+	for _, q := range queue {
+		if q.BuildingType == buildingType && !q.CompletesAt.Before(time.Now()) {
+			return QueueEntry{}, ErrAlreadyQueued
+		}
+	}
+
+	planet, err := s.repo.FindByID(ctx, planetID)
+	if err != nil {
+		return QueueEntry{}, err
+	}
+
+	currentLevel, err := s.repo.GetBuildingLevel(ctx, planetID, buildingType)
+	if err != nil {
+		return QueueEntry{}, err
+	}
+
+	metalCost, crystalCost, gasCost := buildingCostResources(buildingType, currentLevel)
+	if planet.Metal < metalCost || planet.Crystal < crystalCost || planet.Gas < gasCost {
+		return QueueEntry{}, ErrInsufficientResources
+	}
+
+	roboticsLevel, _ := s.repo.GetBuildingLevel(ctx, planetID, "robotics_factory")
+	naniteLevel, _ := s.repo.GetBuildingLevel(ctx, planetID, "nanite_factory")
+
+	completesAt := time.Now().Add(buildingBuildDuration(buildingType, currentLevel, roboticsLevel, naniteLevel))
+	entry, err := s.repo.CreateQueueEntry(ctx, planetID, buildingType, currentLevel+1, completesAt)
+	if err != nil {
+		return QueueEntry{}, err
+	}
+
+	if err := s.repo.UpdateResources(ctx, planetID, planet.Metal-metalCost, planet.Crystal-crystalCost, planet.Gas-gasCost, time.Now()); err != nil {
+		return QueueEntry{}, err
+	}
+
+	return entry, nil
+}
+
+func buildingCostResources(buildingType string, currentLevel int) (metal, crystal, gas int) {
+	next := float64(currentLevel + 1)
+	switch buildingType {
+	case "metal_mine":
+		return int(60 * math.Pow(1.5, next)), int(15 * math.Pow(1.5, next)), 0
+	case "crystal_mine":
+		return int(48 * math.Pow(1.6, next)), int(24 * math.Pow(1.6, next)), 0
+	case "gas_mine":
+		return int(225 * math.Pow(1.5, next)), int(75 * math.Pow(1.5, next)), 0
+	case "solar_plant":
+		return int(75 * math.Pow(1.5, next)), int(30 * math.Pow(1.5, next)), 0
+	case "metal_storage":
+		return int(1000 * math.Pow(2, next)), 0, 0
+	case "crystal_storage":
+		return int(1000 * math.Pow(2, next)), 0, 0
+	case "gas_storage":
+		return int(1000 * math.Pow(2, next)), 0, 0
+	case "robotics_factory":
+		return int(400 * math.Pow(2, next)), int(120 * math.Pow(2, next)), int(200 * math.Pow(2, next))
+	case "nanite_factory":
+		return int(1000000 * math.Pow(2, next)), int(500000 * math.Pow(2, next)), int(100000 * math.Pow(2, next))
+	}
+	return 0, 0, 0
+}
+
+func buildingBuildDuration(buildingType string, currentLevel int, roboticsLevel int, naniteLevel int) time.Duration {
+	next := float64(currentLevel + 1)
+	seconds := 71.3 / float64(roboticsLevel+1) * math.Exp(0.406*next)
+	if buildingType != "nanite_factory" {
+		seconds /= math.Pow(2, float64(naniteLevel))
+	}
+	return time.Duration(seconds * float64(time.Second))
 }
 
 func minInt(a, b int) int {
@@ -146,12 +246,12 @@ func storageCapacity(buildingType string, level int) int {
 	return baseStorage + int(5000*math.Pow(1.5, float64(level)))
 }
 
-func toPlanetResponse(p Planet, buildings []Building, prod Production, storage Storage) PlanetResponse {
+func toPlanetResponse(p Planet, buildings []Building, prod Production, storage Storage, queue []QueueEntry) PlanetResponse {
 	return PlanetResponse{
 		ID: p.ID, UserID: p.UserID, Name: p.Name,
 		Metal: p.Metal, Crystal: p.Crystal, Gas: p.Gas,
 		Energy: p.Energy,
 		Galaxy: p.Galaxy, System: p.System, Position: p.Position,
-		Buildings: buildings, Production: prod, Storage: storage,
+		Buildings: buildings, Production: prod, Storage: storage, Queue: queue,
 	}
 }

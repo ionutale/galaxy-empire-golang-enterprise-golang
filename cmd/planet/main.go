@@ -49,6 +49,7 @@ func main() {
 	})
 
 	r.Get("/api/planet/mine", h.GetMyPlanet)
+	r.Post("/api/buildings/{type}/upgrade", h.StartUpgrade)
 
 	srv := &http.Server{Addr: ":8082", Handler: r}
 	go func() {
@@ -112,6 +113,33 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			type VARCHAR(50) NOT NULL,
 			level INTEGER NOT NULL DEFAULT 0,
 			UNIQUE(planet_id, type)
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.construction_queue (
+			id SERIAL PRIMARY KEY,
+			planet_id INTEGER NOT NULL REFERENCES planet.planets(id) ON DELETE CASCADE,
+			building_type VARCHAR(50) NOT NULL,
+			target_level INTEGER NOT NULL,
+			started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			completes_at TIMESTAMPTZ NOT NULL,
+			completed BOOLEAN NOT NULL DEFAULT FALSE
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO planet.buildings (planet_id, type, level)
+		SELECT p.id, btype, 1
+		FROM planet.planets p
+		CROSS JOIN (VALUES ('robotics_factory'), ('nanite_factory')) AS t(btype)
+		WHERE NOT EXISTS (
+			SELECT 1 FROM planet.buildings b
+			WHERE b.planet_id = p.id AND b.type = t.btype
 		);
 	`); err != nil {
 		return err

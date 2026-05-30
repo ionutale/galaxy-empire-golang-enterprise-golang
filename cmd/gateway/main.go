@@ -63,6 +63,7 @@ func main() {
 			r.Use(jwtMiddleware(jwtKey))
 			r.Get("/auth/me", proxyToService(authAddr))
 			r.Get("/planet/mine", proxyToService(planetAddr))
+			r.Post("/buildings/{type}/upgrade", proxyToService(planetAddr))
 		})
 	})
 

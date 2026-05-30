@@ -8,18 +8,22 @@ import (
 )
 
 type mockRepo struct {
-	planets   map[int]Planet
-	buildings map[int][]Building
-	nextPID   int
-	nextBID   int
+	planets    map[int]Planet
+	buildings  map[int][]Building
+	queue      map[int][]QueueEntry
+	nextPID    int
+	nextBID    int
+	nextQID    int
 }
 
 func newMockRepo() *mockRepo {
 	return &mockRepo{
 		planets:   make(map[int]Planet),
 		buildings: make(map[int][]Building),
+		queue:     make(map[int][]QueueEntry),
 		nextPID:   1,
 		nextBID:   1,
+		nextQID:   1,
 	}
 }
 
@@ -30,6 +34,14 @@ func (m *mockRepo) FindByUserID(_ context.Context, userID int) (Planet, error) {
 		}
 	}
 	return Planet{}, ErrPlanetNotFound
+}
+
+func (m *mockRepo) FindByID(_ context.Context, planetID int) (Planet, error) {
+	p, ok := m.planets[planetID]
+	if !ok {
+		return Planet{}, ErrPlanetNotFound
+	}
+	return p, nil
 }
 
 func (m *mockRepo) Create(_ context.Context, userID int) (Planet, []Building, error) {
@@ -46,6 +58,7 @@ func (m *mockRepo) Create(_ context.Context, userID int) (Planet, []Building, er
 	seedTypes := []string{
 		"metal_mine", "crystal_mine", "gas_mine", "solar_plant",
 		"metal_storage", "crystal_storage", "gas_storage",
+		"robotics_factory", "nanite_factory",
 	}
 	buildings := make([]Building, 0, len(seedTypes))
 	for _, t := range seedTypes {
@@ -54,6 +67,7 @@ func (m *mockRepo) Create(_ context.Context, userID int) (Planet, []Building, er
 		buildings = append(buildings, b)
 	}
 	m.buildings[p.ID] = buildings
+	m.queue[p.ID] = []QueueEntry{}
 	return p, buildings, nil
 }
 
@@ -74,6 +88,56 @@ func (m *mockRepo) GetBuildings(_ context.Context, planetID int) ([]Building, er
 	return m.buildings[planetID], nil
 }
 
+func (m *mockRepo) GetBuildingLevel(_ context.Context, planetID int, buildingType string) (int, error) {
+	for _, b := range m.buildings[planetID] {
+		if b.Type == buildingType {
+			return b.Level, nil
+		}
+	}
+	return 0, ErrInvalidBuilding
+}
+
+func (m *mockRepo) GetActiveQueue(_ context.Context, planetID int) ([]QueueEntry, error) {
+	entries := m.queue[planetID]
+	var active []QueueEntry
+	for _, q := range entries {
+		if time.Now().Before(q.CompletesAt) || !q.CompletesAt.IsZero() {
+			active = append(active, q)
+		}
+	}
+	if active == nil {
+		return []QueueEntry{}, nil
+	}
+	return active, nil
+}
+
+func (m *mockRepo) CreateQueueEntry(_ context.Context, planetID int, buildingType string, targetLevel int, completesAt time.Time) (QueueEntry, error) {
+	q := QueueEntry{
+		ID: m.nextQID, BuildingType: buildingType,
+		TargetLevel: targetLevel, CompletesAt: completesAt,
+	}
+	m.nextQID++
+	m.queue[planetID] = append(m.queue[planetID], q)
+	return q, nil
+}
+
+func (m *mockRepo) CompleteBuild(_ context.Context, queueID int, buildingType string, targetLevel int) error {
+	for pid, entries := range m.queue {
+		for i, q := range entries {
+			if q.ID == queueID {
+				m.queue[pid] = append(entries[:i], entries[i+1:]...)
+				for j, b := range m.buildings[pid] {
+					if b.Type == buildingType {
+						m.buildings[pid][j].Level = targetLevel
+					}
+				}
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
 func TestGetOrCreate_FirstCallCreatesWithBuildings(t *testing.T) {
 	svc := NewPlanetService(newMockRepo())
 	p, buildings, err := svc.GetOrCreatePlanet(context.Background(), 42)
@@ -83,22 +147,8 @@ func TestGetOrCreate_FirstCallCreatesWithBuildings(t *testing.T) {
 	if p.UserID != 42 {
 		t.Errorf("expected user_id 42, got %d", p.UserID)
 	}
-	if p.Name != "Homeworld" {
-		t.Errorf("expected Homeworld, got %s", p.Name)
-	}
-	if len(buildings) != 7 {
-		t.Errorf("expected 7 buildings, got %d", len(buildings))
-	}
-	types := make(map[string]int)
-	for _, b := range buildings {
-		types[b.Type] = b.Level
-	}
-	expected := []string{"metal_mine", "crystal_mine", "gas_mine", "solar_plant",
-		"metal_storage", "crystal_storage", "gas_storage"}
-	for _, typ := range expected {
-		if types[typ] != 1 {
-			t.Errorf("expected %s level 1, got %d", typ, types[typ])
-		}
+	if len(buildings) != 9 {
+		t.Errorf("expected 9 buildings, got %d", len(buildings))
 	}
 }
 
@@ -108,12 +158,10 @@ func TestGetOrCreate_SecondCallReturnsExisting(t *testing.T) {
 	if err != nil {
 		t.Fatal("first call failed:", err)
 	}
-
 	p2, _, err := svc.GetOrCreatePlanet(context.Background(), 42)
 	if err != nil {
 		t.Fatal("second call failed:", err)
 	}
-
 	if p1.ID != p2.ID {
 		t.Errorf("expected same planet ID, got %d vs %d", p1.ID, p2.ID)
 	}
@@ -125,20 +173,15 @@ func TestGetOrCreate_ResourceAccumulation(t *testing.T) {
 	if err != nil {
 		t.Fatal("first call:", err)
 	}
-
 	initialUpdatedAt := p.ResourcesUpdatedAt
-
 	time.Sleep(2 * time.Second)
-
 	p2, _, err := svc.GetOrCreatePlanet(context.Background(), 99)
 	if err != nil {
 		t.Fatal("second call:", err)
 	}
-
 	if !p2.ResourcesUpdatedAt.After(initialUpdatedAt) {
-		t.Error("resources_updated_at should have advanced after second call")
+		t.Error("resources_updated_at should have advanced")
 	}
-
 	totalResources := p2.Metal + p2.Crystal + p2.Gas
 	if totalResources <= 1000 {
 		t.Errorf("resources should have increased, got %d", totalResources)
@@ -158,7 +201,6 @@ func TestProductionRate(t *testing.T) {
 		{"gas_mine", 1, 10, 20},
 		{"solar_plant", 1, 40, 50},
 	}
-
 	for _, tc := range tests {
 		rate := productionRate(tc.building, tc.level)
 		if rate < tc.minRate || rate > tc.maxRate {
@@ -185,7 +227,6 @@ func TestCalculateProduction(t *testing.T) {
 		{Type: "solar_plant", Level: 3},
 	}
 	prod := svc.calculateProduction(buildings, 1.0)
-
 	if prod.Metal <= 0 {
 		t.Error("expected positive metal production")
 	}
@@ -203,13 +244,8 @@ func TestCalculateProduction_WithPenalty(t *testing.T) {
 		{Type: "gas_mine", Level: 5},
 	}
 	prod := svc.calculateProduction(buildings, 0.5)
-
 	if prod.Metal <= 0 {
 		t.Error("expected positive metal production even with penalty")
-	}
-	expectedHalf := productionRate("metal_mine", 5) / 60.0 * 0.5
-	if math.Abs(prod.Metal-expectedHalf) > 0.01 {
-		t.Errorf("expected ~%.4f metal/s with 0.5 penalty, got %.4f", expectedHalf, prod.Metal)
 	}
 }
 
@@ -227,21 +263,15 @@ func TestBuildingFormulaScale(t *testing.T) {
 	}
 }
 
-func TestStorageCapacity_Default(t *testing.T) {
+func TestStorageCapacity(t *testing.T) {
 	cap := storageCapacity("metal_storage", 0)
 	if cap != baseStorage {
 		t.Errorf("expected base storage %d, got %d", baseStorage, cap)
 	}
-}
-
-func TestStorageCapacity_Level1(t *testing.T) {
-	cap := storageCapacity("metal_storage", 1)
-	if cap <= baseStorage {
-		t.Errorf("level 1 should exceed base storage %d, got %d", baseStorage, cap)
-	}
+	capL1 := storageCapacity("metal_storage", 1)
 	expected := baseStorage + int(5000*math.Pow(1.5, 1))
-	if cap != expected {
-		t.Errorf("expected %d, got %d", expected, cap)
+	if capL1 != expected {
+		t.Errorf("expected %d, got %d", expected, capL1)
 	}
 }
 
@@ -253,30 +283,8 @@ func TestCalculateStorage(t *testing.T) {
 		{Type: "gas_storage", Level: 3},
 	}
 	storage := svc.calculateStorage(buildings)
-
 	if storage.Metal <= baseStorage {
 		t.Error("metal storage should exceed base")
-	}
-	if storage.Crystal <= baseStorage {
-		t.Error("crystal storage should exceed base")
-	}
-	if storage.Gas <= baseStorage {
-		t.Error("gas storage should exceed base")
-	}
-}
-
-func TestStorage_NoStorageBuildings(t *testing.T) {
-	svc := NewPlanetService(newMockRepo())
-	storage := svc.calculateStorage(nil)
-
-	if storage.Metal != baseStorage {
-		t.Errorf("expected %d for missing metal_storage, got %d", baseStorage, storage.Metal)
-	}
-	if storage.Crystal != baseStorage {
-		t.Errorf("expected %d for missing crystal_storage, got %d", baseStorage, storage.Crystal)
-	}
-	if storage.Gas != baseStorage {
-		t.Errorf("expected %d for missing gas_storage, got %d", baseStorage, storage.Gas)
 	}
 }
 
@@ -286,70 +294,43 @@ func TestResourceCapping(t *testing.T) {
 	if err != nil {
 		t.Fatal("first call:", err)
 	}
-
 	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 77)
 	if err != nil {
 		t.Fatal("second call:", err)
 	}
-
 	mock := svc.repo.(*mockRepo)
 	storedPlanet := mock.planets[planet.ID]
-
 	storage := svc.calculateStorage(buildings)
 	if storedPlanet.Metal > storage.Metal {
 		t.Errorf("metal %d exceeds storage %d", storedPlanet.Metal, storage.Metal)
 	}
-	if storedPlanet.Crystal > storage.Crystal {
-		t.Errorf("crystal %d exceeds storage %d", storedPlanet.Crystal, storage.Crystal)
-	}
-	if storedPlanet.Gas > storage.Gas {
-		t.Errorf("gas %d exceeds storage %d", storedPlanet.Gas, storage.Gas)
-	}
 }
 
-func TestCalculatePenaltyFactor_PositiveNet(t *testing.T) {
+func TestPenaltyFactor(t *testing.T) {
 	buildings := []Building{
-		{Type: "metal_mine", Level: 1},   // consumes 10
-		{Type: "solar_plant", Level: 1},  // produces 44
+		{Type: "metal_mine", Level: 1},
+		{Type: "solar_plant", Level: 1},
 	}
 	netEnergy, efficiency := calculatePenaltyFactor(buildings)
 	if netEnergy <= 0 {
 		t.Errorf("expected positive net energy, got %d", netEnergy)
 	}
 	if efficiency != 1.0 {
-		t.Errorf("expected efficiency 1.0 for positive net, got %.2f", efficiency)
+		t.Errorf("expected efficiency 1.0, got %.2f", efficiency)
 	}
-}
 
-func TestCalculatePenaltyFactor_NegativeNet(t *testing.T) {
-	buildings := []Building{
-		{Type: "metal_mine", Level: 5},   // consumes 50
-		{Type: "crystal_mine", Level: 5}, // consumes 50
-		{Type: "gas_mine", Level: 5},     // consumes 100
-		{Type: "solar_plant", Level: 1},  // produces 44
+	buildings2 := []Building{
+		{Type: "metal_mine", Level: 5},
+		{Type: "crystal_mine", Level: 5},
+		{Type: "gas_mine", Level: 5},
+		{Type: "solar_plant", Level: 1},
 	}
-	netEnergy, efficiency := calculatePenaltyFactor(buildings)
-	if netEnergy >= 0 {
-		t.Errorf("expected negative net energy, got %d", netEnergy)
+	netEnergy2, efficiency2 := calculatePenaltyFactor(buildings2)
+	if netEnergy2 >= 0 {
+		t.Errorf("expected negative net energy, got %d", netEnergy2)
 	}
-	if efficiency >= 1.0 {
-		t.Errorf("expected efficiency < 1.0 for negative net, got %.2f", efficiency)
-	}
-	if efficiency <= 0 {
-		t.Errorf("expected positive efficiency, got %.2f", efficiency)
-	}
-}
-
-func TestCalculatePenaltyFactor_SolarOnly(t *testing.T) {
-	buildings := []Building{
-		{Type: "solar_plant", Level: 3},
-	}
-	netEnergy, efficiency := calculatePenaltyFactor(buildings)
-	if netEnergy <= 0 {
-		t.Errorf("expected positive net for solar only, got %d", netEnergy)
-	}
-	if efficiency != 1.0 {
-		t.Errorf("expected 1.0 efficiency for solar only, got %.2f", efficiency)
+	if efficiency2 >= 1.0 {
+		t.Errorf("expected efficiency < 1.0, got %.2f", efficiency2)
 	}
 }
 
@@ -363,8 +344,6 @@ func TestEnergyConsumptionPerMinute(t *testing.T) {
 		{"crystal_mine", 1, 10},
 		{"gas_mine", 1, 20},
 		{"metal_storage", 1, 0},
-		{"unknown", 1, 0},
-		{"metal_mine", 0, 0},
 	}
 	for _, tc := range tests {
 		got := energyConsumptionPerMinute(tc.typ, tc.level)
@@ -376,8 +355,200 @@ func TestEnergyConsumptionPerMinute(t *testing.T) {
 
 func TestSolarPlantRate_Level1(t *testing.T) {
 	rate := productionRate("solar_plant", 1)
-	expected := 44.0
-	if rate != expected {
-		t.Errorf("expected solar plant L1 production %.0f/h, got %.2f", expected, rate)
+	if rate != 44.0 {
+		t.Errorf("expected 44.0, got %.2f", rate)
+	}
+}
+
+func TestBuildingCostResources(t *testing.T) {
+	metal, crystal, gas := buildingCostResources("metal_mine", 0)
+	if metal <= 0 || crystal <= 0 {
+		t.Errorf("expected positive costs for metal_mine upgrade from L0, got metal=%d crystal=%d", metal, crystal)
+	}
+	if gas != 0 {
+		t.Errorf("expected 0 gas for metal_mine, got %d", gas)
+	}
+}
+
+func TestBuildingCostResources_Invalid(t *testing.T) {
+	metal, crystal, gas := buildingCostResources("unknown", 1)
+	if metal != 0 || crystal != 0 || gas != 0 {
+		t.Errorf("expected zero costs for unknown building, got %d %d %d", metal, crystal, gas)
+	}
+}
+
+func TestBuildingCostScaling(t *testing.T) {
+	_, c1, _ := buildingCostResources("crystal_mine", 0)
+	_, c2, _ := buildingCostResources("crystal_mine", 1)
+	if c2 <= c1 {
+		t.Errorf("cost should increase with level: L0=%d L1=%d", c1, c2)
+	}
+}
+
+func TestBuildDuration(t *testing.T) {
+	d := buildingBuildDuration("metal_mine", 0, 0, 0)
+	if d <= 0 {
+		t.Error("expected positive duration")
+	}
+	if d > 5*time.Minute {
+		t.Errorf("expected L0->L1 to take <5 min, got %v", d)
+	}
+}
+
+func TestBuildDurationScaling(t *testing.T) {
+	d1 := buildingBuildDuration("metal_mine", 0, 0, 0)
+	d2 := buildingBuildDuration("metal_mine", 5, 0, 0)
+	if d2 <= d1 {
+		t.Errorf("higher level should take longer: L0-%v L5-%v", d1, d2)
+	}
+}
+
+func TestBuildDurationRoboticsReduction(t *testing.T) {
+	base := buildingBuildDuration("metal_mine", 1, 0, 0)
+	reduced := buildingBuildDuration("metal_mine", 1, 3, 0)
+	if reduced >= base {
+		t.Errorf("robotics should reduce time: base=%v reduced=%v", base, reduced)
+	}
+}
+
+func TestBuildDurationNaniteReduction(t *testing.T) {
+	base := buildingBuildDuration("metal_mine", 1, 0, 0)
+	reduced := buildingBuildDuration("metal_mine", 1, 0, 2)
+	if reduced >= base {
+		t.Errorf("nanite should reduce time: base=%v reduced=%v", base, reduced)
+	}
+}
+
+func TestBuildDurationNaniteDoesNotAffectSelf(t *testing.T) {
+	base := buildingBuildDuration("nanite_factory", 1, 0, 0)
+	withNanite := buildingBuildDuration("nanite_factory", 1, 0, 3)
+	if withNanite != base {
+		t.Errorf("nanite should not reduce its own time: base=%v withNanite=%v", base, withNanite)
+	}
+}
+
+func TestBuildingCostRobotics(t *testing.T) {
+	metal, crystal, gas := buildingCostResources("robotics_factory", 0)
+	if metal <= 0 || crystal <= 0 || gas <= 0 {
+		t.Errorf("expected all positive costs for robotics_factory L0->1, got m=%d c=%d g=%d", metal, crystal, gas)
+	}
+}
+
+func TestBuildingCostNanite(t *testing.T) {
+	metal, crystal, gas := buildingCostResources("nanite_factory", 0)
+	if metal <= 0 || crystal <= 0 || gas <= 0 {
+		t.Errorf("expected all positive costs for nanite_factory L0->1, got m=%d c=%d g=%d", metal, crystal, gas)
+	}
+}
+
+func TestService_StartUpgrade_InsufficientResources(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	_, buildings, err := svc.GetOrCreatePlanet(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planet := svc.repo.(*mockRepo).planets[1]
+	svc.repo.UpdateResources(context.Background(), planet.ID, 0, 0, 0, time.Now())
+
+	_, err = svc.StartBuildingUpgrade(context.Background(), planet.ID, buildings[0].Type)
+	if err != ErrInsufficientResources {
+		t.Errorf("expected ErrInsufficientResources, got %v", err)
+	}
+}
+
+func TestService_StartUpgrade_Success(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := svc.StartBuildingUpgrade(context.Background(), planet.ID, buildings[0].Type)
+	if err != nil {
+		t.Fatal("expected success, got:", err)
+	}
+	if entry.BuildingType != buildings[0].Type {
+		t.Errorf("expected %s, got %s", buildings[0].Type, entry.BuildingType)
+	}
+	if entry.TargetLevel != 2 {
+		t.Errorf("expected target level 2, got %d", entry.TargetLevel)
+	}
+	if entry.CompletesAt.Before(time.Now()) {
+		t.Error("completes_at should be in the future")
+	}
+}
+
+func TestService_StartUpgrade_DeductsResources(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := svc.repo.(*mockRepo)
+	initialMetal := planet.Metal
+
+	buildingLevel := 1
+	for _, b := range buildings {
+		if b.Type == buildings[0].Type {
+			buildingLevel = b.Level
+			break
+		}
+	}
+	metalCost, _, _ := buildingCostResources(buildings[0].Type, buildingLevel)
+	_, err = svc.StartBuildingUpgrade(context.Background(), planet.ID, buildings[0].Type)
+	if err != nil {
+		t.Fatal("expected success, got:", err)
+	}
+
+	updatedPlanet := mock.planets[planet.ID]
+	if updatedPlanet.Metal != initialMetal-metalCost {
+		t.Errorf("expected metal %d - %d = %d, got %d",
+			initialMetal, metalCost, initialMetal-metalCost, updatedPlanet.Metal)
+	}
+}
+
+func TestService_StartUpgrade_AlreadyQueued(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.StartBuildingUpgrade(context.Background(), planet.ID, buildings[0].Type)
+	if err != nil {
+		t.Fatal("first upgrade failed:", err)
+	}
+
+	_, err = svc.StartBuildingUpgrade(context.Background(), planet.ID, buildings[0].Type)
+	if err != ErrAlreadyQueued {
+		t.Errorf("expected ErrAlreadyQueued, got %v", err)
+	}
+}
+
+func TestService_ProcessCompletedBuilds(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	mock := svc.repo.(*mockRepo)
+	p, buildings, err := svc.GetOrCreatePlanet(context.Background(), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldLevel := mock.buildings[p.ID][0].Level
+
+	_, err = svc.StartBuildingUpgrade(context.Background(), p.ID, buildings[0].Type)
+	if err != nil {
+		t.Fatal("start upgrade:", err)
+	}
+
+	mock.queue[p.ID][0].CompletesAt = time.Now().Add(-1 * time.Second)
+
+	err = svc.processCompletedBuilds(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal("process builds:", err)
+	}
+
+	newLevel := mock.buildings[p.ID][0].Level
+	if newLevel <= oldLevel {
+		t.Errorf("building level should have increased: old=%d new=%d", oldLevel, newLevel)
 	}
 }

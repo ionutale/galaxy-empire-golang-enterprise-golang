@@ -36,18 +36,26 @@ type Storage struct {
 	Gas     int `json:"gas"`
 }
 
+type QueueEntry struct {
+	ID           int       `json:"id"`
+	BuildingType string    `json:"building_type"`
+	TargetLevel  int       `json:"target_level"`
+	CompletesAt  time.Time `json:"completes_at"`
+}
+
 type PlanetResponse struct {
-	ID         int        `json:"id"`
-	UserID     int        `json:"user_id"`
-	Name       string     `json:"name"`
-	Metal      int        `json:"metal"`
-	Crystal    int        `json:"crystal"`
-	Gas        int        `json:"gas"`
-	Energy     int        `json:"energy"`
-	Galaxy     int        `json:"galaxy"`
-	System     int        `json:"system"`
-	Position   int        `json:"position"`
-	Buildings  []Building `json:"buildings"`
-	Production Production `json:"production"`
-	Storage    Storage    `json:"storage"`
+	ID         int          `json:"id"`
+	UserID     int          `json:"user_id"`
+	Name       string       `json:"name"`
+	Metal      int          `json:"metal"`
+	Crystal    int          `json:"crystal"`
+	Gas        int          `json:"gas"`
+	Energy     int          `json:"energy"`
+	Galaxy     int          `json:"galaxy"`
+	System     int          `json:"system"`
+	Position   int          `json:"position"`
+	Buildings  []Building   `json:"buildings"`
+	Production Production   `json:"production"`
+	Storage    Storage      `json:"storage"`
+	Queue      []QueueEntry `json:"queue"`
 }
