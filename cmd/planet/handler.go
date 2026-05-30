@@ -205,6 +205,71 @@ func (h *Handler) DeconstructBuilding(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entry)
 }
 
+func (h *Handler) ListGalaxies(w http.ResponseWriter, r *http.Request) {
+	galaxies, err := h.service.repo.ListGalaxies(r.Context())
+	if err != nil {
+		slog.Error("list galaxies failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, galaxies)
+}
+
+func (h *Handler) ListSystems(w http.ResponseWriter, r *http.Request) {
+	galaxyIDStr := chi.URLParam(r, "galaxyID")
+	galaxyID, err := strconv.Atoi(galaxyIDStr)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid galaxy"})
+		return
+	}
+
+	pageStr := r.URL.Query().Get("page")
+	page := 1
+	if pageStr != "" {
+		page, err = strconv.Atoi(pageStr)
+		if err != nil || page < 1 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid page"})
+			return
+		}
+	}
+
+	pageSize := 10
+	systems, total, err := h.service.repo.ListSystems(r.Context(), galaxyID, page, pageSize)
+	if err != nil {
+		slog.Error("list systems failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	totalPages := (total + pageSize - 1) / pageSize
+	writeJSON(w, http.StatusOK, map[string]any{
+		"galaxy_id":   galaxyID,
+		"page":        page,
+		"total_pages": totalPages,
+		"systems":     systems,
+	})
+}
+
+func (h *Handler) GetPositions(w http.ResponseWriter, r *http.Request) {
+	systemIDStr := chi.URLParam(r, "systemID")
+	systemID, err := strconv.Atoi(systemIDStr)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid system"})
+		return
+	}
+
+	positions, err := h.service.repo.GetSystemPositions(r.Context(), systemID)
+	if err != nil {
+		slog.Error("get positions failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"system_id": systemID,
+		"positions": positions,
+	})
+}
+
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

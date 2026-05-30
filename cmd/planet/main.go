@@ -53,6 +53,10 @@ func main() {
 	r.Post("/api/buildings/{type}/cancel", h.CancelUpgrade)
 	r.Post("/api/buildings/{type}/deconstruct", h.DeconstructBuilding)
 
+	r.Get("/api/galaxy", h.ListGalaxies)
+	r.Get("/api/galaxy/systems/{galaxyID}", h.ListSystems)
+	r.Get("/api/galaxy/positions/{systemID}", h.GetPositions)
+
 	srv := &http.Server{Addr: ":8082", Handler: r}
 	go func() {
 		slog.Info("planet service starting", "addr", srv.Addr)
