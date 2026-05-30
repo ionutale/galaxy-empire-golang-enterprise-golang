@@ -218,7 +218,7 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		INSERT INTO planet.buildings (planet_id, type, level)
 		SELECT p.id, btype, 1
 		FROM planet.planets p
-		CROSS JOIN (VALUES ('robotics_factory'), ('nanite_factory'), ('terraformer'), ('fusion_reactor')) AS t(btype)
+		CROSS JOIN (VALUES ('robotics_factory'), ('nanite_factory'), ('terraformer'), ('fusion_reactor'), ('shipyard')) AS t(btype)
 		WHERE NOT EXISTS (
 			SELECT 1 FROM planet.buildings b
 			WHERE b.planet_id = p.id AND b.type = t.btype
@@ -304,6 +304,31 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		`); err != nil {
 			return err
 		}
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.player_ships (
+			id SERIAL PRIMARY KEY,
+			planet_id INT NOT NULL REFERENCES planet.planets(id) ON DELETE CASCADE,
+			ship_type VARCHAR(50) NOT NULL,
+			quantity INT NOT NULL DEFAULT 0,
+			UNIQUE(planet_id, ship_type)
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO planet.player_ships (planet_id, ship_type, quantity)
+		SELECT p.id, s.ship_type, 0
+		FROM planet.planets p
+		CROSS JOIN (VALUES ('cargo'), ('large_cargo'), ('recycler'), ('espionage_probe'), ('colony_ship'), ('solar_satellite'), ('light_fighter'), ('heavy_fighter'), ('cruiser'), ('battleship'), ('dreadnought'), ('bomber')) AS s(ship_type)
+		WHERE NOT EXISTS (
+			SELECT 1 FROM planet.player_ships ps
+			WHERE ps.planet_id = p.id AND ps.ship_type = s.ship_type
+		);
+	`); err != nil {
+		return err
 	}
 
 	return nil
