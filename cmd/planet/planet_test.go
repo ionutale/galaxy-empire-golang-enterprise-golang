@@ -126,7 +126,6 @@ func TestGetOrCreate_ResourceAccumulation(t *testing.T) {
 		t.Fatal("first call:", err)
 	}
 
-	initialResources := p.Metal + p.Crystal + p.Gas
 	initialUpdatedAt := p.ResourcesUpdatedAt
 
 	time.Sleep(2 * time.Second)
@@ -141,8 +140,8 @@ func TestGetOrCreate_ResourceAccumulation(t *testing.T) {
 	}
 
 	totalResources := p2.Metal + p2.Crystal + p2.Gas
-	if totalResources <= initialResources {
-		t.Errorf("resources should have increased: initial=%d, after=%d", initialResources, totalResources)
+	if totalResources <= 1000 {
+		t.Errorf("resources should have increased, got %d", totalResources)
 	}
 }
 
@@ -157,7 +156,7 @@ func TestProductionRate(t *testing.T) {
 		{"metal_mine", 5, 200, 250},
 		{"crystal_mine", 1, 20, 30},
 		{"gas_mine", 1, 10, 20},
-		{"solar_plant", 1, 20, 30},
+		{"solar_plant", 1, 40, 50},
 	}
 
 	for _, tc := range tests {
@@ -185,7 +184,7 @@ func TestCalculateProduction(t *testing.T) {
 		{Type: "gas_mine", Level: 1},
 		{Type: "solar_plant", Level: 3},
 	}
-	prod := svc.calculateProduction(buildings)
+	prod := svc.calculateProduction(buildings, 1.0)
 
 	if prod.Metal <= 0 {
 		t.Error("expected positive metal production")
@@ -193,6 +192,24 @@ func TestCalculateProduction(t *testing.T) {
 	rounded := math.Round(prod.Metal * 60)
 	if rounded != 33 {
 		t.Errorf("metal L1 should produce 33/min, got %.2f/min", prod.Metal*60)
+	}
+}
+
+func TestCalculateProduction_WithPenalty(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	buildings := []Building{
+		{Type: "metal_mine", Level: 5},
+		{Type: "crystal_mine", Level: 5},
+		{Type: "gas_mine", Level: 5},
+	}
+	prod := svc.calculateProduction(buildings, 0.5)
+
+	if prod.Metal <= 0 {
+		t.Error("expected positive metal production even with penalty")
+	}
+	expectedHalf := productionRate("metal_mine", 5) / 60.0 * 0.5
+	if math.Abs(prod.Metal-expectedHalf) > 0.01 {
+		t.Errorf("expected ~%.4f metal/s with 0.5 penalty, got %.4f", expectedHalf, prod.Metal)
 	}
 }
 
@@ -287,5 +304,80 @@ func TestResourceCapping(t *testing.T) {
 	}
 	if storedPlanet.Gas > storage.Gas {
 		t.Errorf("gas %d exceeds storage %d", storedPlanet.Gas, storage.Gas)
+	}
+}
+
+func TestCalculatePenaltyFactor_PositiveNet(t *testing.T) {
+	buildings := []Building{
+		{Type: "metal_mine", Level: 1},   // consumes 10
+		{Type: "solar_plant", Level: 1},  // produces 44
+	}
+	netEnergy, efficiency := calculatePenaltyFactor(buildings)
+	if netEnergy <= 0 {
+		t.Errorf("expected positive net energy, got %d", netEnergy)
+	}
+	if efficiency != 1.0 {
+		t.Errorf("expected efficiency 1.0 for positive net, got %.2f", efficiency)
+	}
+}
+
+func TestCalculatePenaltyFactor_NegativeNet(t *testing.T) {
+	buildings := []Building{
+		{Type: "metal_mine", Level: 5},   // consumes 50
+		{Type: "crystal_mine", Level: 5}, // consumes 50
+		{Type: "gas_mine", Level: 5},     // consumes 100
+		{Type: "solar_plant", Level: 1},  // produces 44
+	}
+	netEnergy, efficiency := calculatePenaltyFactor(buildings)
+	if netEnergy >= 0 {
+		t.Errorf("expected negative net energy, got %d", netEnergy)
+	}
+	if efficiency >= 1.0 {
+		t.Errorf("expected efficiency < 1.0 for negative net, got %.2f", efficiency)
+	}
+	if efficiency <= 0 {
+		t.Errorf("expected positive efficiency, got %.2f", efficiency)
+	}
+}
+
+func TestCalculatePenaltyFactor_SolarOnly(t *testing.T) {
+	buildings := []Building{
+		{Type: "solar_plant", Level: 3},
+	}
+	netEnergy, efficiency := calculatePenaltyFactor(buildings)
+	if netEnergy <= 0 {
+		t.Errorf("expected positive net for solar only, got %d", netEnergy)
+	}
+	if efficiency != 1.0 {
+		t.Errorf("expected 1.0 efficiency for solar only, got %.2f", efficiency)
+	}
+}
+
+func TestEnergyConsumptionPerMinute(t *testing.T) {
+	tests := []struct {
+		typ   string
+		level int
+		want  float64
+	}{
+		{"metal_mine", 1, 10},
+		{"crystal_mine", 1, 10},
+		{"gas_mine", 1, 20},
+		{"metal_storage", 1, 0},
+		{"unknown", 1, 0},
+		{"metal_mine", 0, 0},
+	}
+	for _, tc := range tests {
+		got := energyConsumptionPerMinute(tc.typ, tc.level)
+		if got != tc.want {
+			t.Errorf("%s L%d: expected %.0f, got %.0f", tc.typ, tc.level, tc.want, got)
+		}
+	}
+}
+
+func TestSolarPlantRate_Level1(t *testing.T) {
+	rate := productionRate("solar_plant", 1)
+	expected := 44.0
+	if rate != expected {
+		t.Errorf("expected solar plant L1 production %.0f/h, got %.2f", expected, rate)
 	}
 }

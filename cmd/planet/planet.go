@@ -31,9 +31,11 @@ func (s *PlanetService) GetOrCreatePlanet(ctx context.Context, userID int) (Plan
 		return Planet{}, nil, err
 	}
 
-	prod := s.calculateProduction(buildings)
+	netEnergy, efficiency := calculatePenaltyFactor(buildings)
+	prod := s.calculateProduction(buildings, efficiency)
 	storage := s.calculateStorage(buildings)
 	elapsed := time.Since(planet.ResourcesUpdatedAt).Seconds()
+
 	if elapsed > 0 {
 		planet.Metal = minInt(planet.Metal+int(prod.Metal*elapsed), storage.Metal)
 		planet.Crystal = minInt(planet.Crystal+int(prod.Crystal*elapsed), storage.Crystal)
@@ -46,6 +48,7 @@ func (s *PlanetService) GetOrCreatePlanet(ctx context.Context, userID int) (Plan
 		return Planet{}, nil, err
 	}
 
+	planet.Energy = netEnergy
 	return planet, buildings, nil
 }
 
@@ -56,16 +59,52 @@ func minInt(a, b int) int {
 	return b
 }
 
-func (s *PlanetService) calculateProduction(buildings []Building) Production {
+func calculatePenaltyFactor(buildings []Building) (netEnergyPerMin int, efficiency float64) {
+	var totalProd, totalCons float64
+	for _, b := range buildings {
+		if b.Type == "solar_plant" {
+			totalProd += productionRate("solar_plant", b.Level)
+		} else {
+			totalCons += energyConsumptionPerMinute(b.Type, b.Level)
+		}
+	}
+
+	netEnergyPerMin = int(totalProd - totalCons)
+	efficiency = 1.0
+	if netEnergyPerMin < 0 && totalCons > 0 {
+		efficiency = totalProd / totalCons
+		if efficiency < 0.1 {
+			efficiency = 0.1
+		}
+	}
+	return
+}
+
+func energyConsumptionPerMinute(buildingType string, level int) float64 {
+	if level < 1 {
+		return 0
+	}
+	switch buildingType {
+	case "metal_mine":
+		return 10 * float64(level)
+	case "crystal_mine":
+		return 10 * float64(level)
+	case "gas_mine":
+		return 20 * float64(level)
+	}
+	return 0
+}
+
+func (s *PlanetService) calculateProduction(buildings []Building, efficiency float64) Production {
 	levels := make(map[string]int)
 	for _, b := range buildings {
 		levels[b.Type] = b.Level
 	}
 
 	return Production{
-		Metal:   productionRate("metal_mine", levels["metal_mine"]) / 60.0,
-		Crystal: productionRate("crystal_mine", levels["crystal_mine"]) / 60.0,
-		Gas:     productionRate("gas_mine", levels["gas_mine"]) / 60.0,
+		Metal:   productionRate("metal_mine", levels["metal_mine"]) / 60.0 * efficiency,
+		Crystal: productionRate("crystal_mine", levels["crystal_mine"]) / 60.0 * efficiency,
+		Gas:     productionRate("gas_mine", levels["gas_mine"]) / 60.0 * efficiency,
 		Energy:  productionRate("solar_plant", levels["solar_plant"]) / 60.0,
 	}
 }
@@ -95,7 +134,7 @@ func productionRate(buildingType string, level int) float64 {
 	case "gas_mine":
 		return math.Round(10*float64(level)*math.Pow(1.1, float64(level))*100) / 100
 	case "solar_plant":
-		return math.Round(20*float64(level)*math.Pow(1.1, float64(level))*100) / 100
+		return math.Round(40*float64(level)*math.Pow(1.1, float64(level))*100) / 100
 	}
 	return 0
 }
@@ -104,15 +143,14 @@ func storageCapacity(buildingType string, level int) int {
 	if level < 1 {
 		return baseStorage
 	}
-	bonus := int(5000 * math.Pow(1.5, float64(level)))
-	return baseStorage + bonus
+	return baseStorage + int(5000*math.Pow(1.5, float64(level)))
 }
 
 func toPlanetResponse(p Planet, buildings []Building, prod Production, storage Storage) PlanetResponse {
 	return PlanetResponse{
 		ID: p.ID, UserID: p.UserID, Name: p.Name,
 		Metal: p.Metal, Crystal: p.Crystal, Gas: p.Gas,
-		Energy: int(math.Round(prod.Energy * 60)),
+		Energy: p.Energy,
 		Galaxy: p.Galaxy, System: p.System, Position: p.Position,
 		Buildings: buildings, Production: prod, Storage: storage,
 	}

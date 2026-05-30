@@ -108,10 +108,10 @@
             </div>
             <span class="cap">{planet.gas}/{planet.storage.gas}</span>
           </div>
-          <div class="res energy">
-            <span class="label">Energy</span>
-            <span class="val">{planet.energy}</span>
-            <span class="rate">{planet.production.energy.toFixed(1)}/s</span>
+          <div class="res energy" class:negative={planet.energy < 0}>
+            <span class="label">{planet.energy < 0 ? '⚡' : '⚡'} Energy</span>
+            <span class="val" class:red={planet.energy < 0}>{planet.energy}</span>
+            <span class="rate">+{planet.production.energy.toFixed(1)}/s</span>
           </div>
         </div>
 
@@ -207,6 +207,11 @@
   .val { font-size: 1.25rem; font-weight: 600; }
   .rate { font-size: 0.7rem; color: #3a6a3a; }
   .energy .rate { color: #6a6a3a; }
+  .energy.negative { border-color: #5a2020; }
+  .energy.negative .label { color: #d47474; }
+  .energy.negative .val { color: #d47474; }
+  .energy.negative .rate { color: #5a3a3a; }
+  .red { color: #d47474; }
   .cap { font-size: 0.65rem; color: #5a5a6a; }
   .storage-bar { height: 4px; background: #0a0e1a; border-radius: 2px; margin: 0.15rem 0; overflow: hidden; }
   .storage-bar .fill { height: 100%; background: #2a5a3a; border-radius: 2px; transition: width 0.5s; }
