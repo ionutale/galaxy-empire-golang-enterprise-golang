@@ -59,9 +59,11 @@ services:
 
   planet:
     build: ./cmd/planet
+    environment:
+      DATABASE_URL: postgres://galaxy:galaxy_dev@postgres:5432/galaxy_empire?sslmode=disable
     depends_on:
-      auth:
-        condition: service_started
+      postgres:
+        condition: service_healthy
 
 volumes:
   pgdata:

@@ -40,7 +40,7 @@
 
   async function loadPlanet() {
     try {
-      const res = await fetch('/api/planet/1', {
+      const res = await fetch('/api/planet/mine', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (!res.ok) throw new Error('Failed to load planet')

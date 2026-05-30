@@ -62,7 +62,7 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(jwtMiddleware(jwtKey))
 			r.Get("/auth/me", proxyToService(authAddr))
-			r.Get("/planet/{id}", proxyToService(planetAddr))
+			r.Get("/planet/mine", proxyToService(planetAddr))
 		})
 	})
 

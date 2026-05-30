@@ -2,47 +2,41 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-type Planet struct {
-	ID       int    `json:"id"`
-	Name     string `json:"name"`
-	Owner    string `json:"owner"`
-	Metal    int    `json:"metal"`
-	Crystal  int    `json:"crystal"`
-	Gas      int    `json:"gas"`
-	Energy   int    `json:"energy"`
-	Galaxy   int    `json:"galaxy"`
-	System   int    `json:"system"`
-	Position int    `json:"position"`
-}
-
-var planets = map[int]Planet{
-	1: {
-		ID: 1, Name: "Homeworld", Owner: "Commander",
-		Galaxy: 1, System: 1, Position: 7,
-		Metal: 500, Crystal: 300, Gas: 200, Energy: 50,
-	},
-	2: {
-		ID: 2, Name: "Colony-1", Owner: "Commander",
-		Galaxy: 1, System: 2, Position: 4,
-		Metal: 200, Crystal: 150, Gas: 100, Energy: 25,
-	},
-}
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+	databaseURL := getEnv("DATABASE_URL", "postgres://galaxy:galaxy_dev@localhost:5432/galaxy_empire?sslmode=disable")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		slog.Error("connect to database", "error", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	if err := runMigrations(ctx, pool); err != nil {
+		slog.Error("run migrations", "error", err)
+		os.Exit(1)
+	}
+
+	repo := NewPostgresRepository(pool)
+	svc := NewPlanetService(repo)
+	h := NewHandler(svc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -54,21 +48,7 @@ func main() {
 		w.Write([]byte(`{"status":"ok","service":"planet"}`))
 	})
 
-	r.Get("/api/planet/{id}", func(w http.ResponseWriter, r *http.Request) {
-		idStr := chi.URLParam(r, "id")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			http.Error(w, `{"error":"invalid planet id"}`, http.StatusBadRequest)
-			return
-		}
-		p, ok := planets[id]
-		if !ok {
-			http.Error(w, `{"error":"planet not found"}`, http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(p)
-	})
+	r.Get("/api/planet/mine", h.GetMyPlanet)
 
 	srv := &http.Server{Addr: ":8082", Handler: r}
 	go func() {
@@ -84,7 +64,35 @@ func main() {
 	<-quit
 
 	slog.Info("planet service shutting down")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	srv.Shutdown(ctx)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	srv.Shutdown(shutdownCtx)
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := pool.Exec(ctx, `
+		CREATE SCHEMA IF NOT EXISTS planet;
+		CREATE TABLE IF NOT EXISTS planet.planets (
+			id SERIAL PRIMARY KEY,
+			user_id INTEGER UNIQUE NOT NULL,
+			name VARCHAR(100) NOT NULL DEFAULT 'Homeworld',
+			galaxy INTEGER NOT NULL DEFAULT 1,
+			system INTEGER NOT NULL DEFAULT 1,
+			position INTEGER NOT NULL DEFAULT 7,
+			metal INTEGER NOT NULL DEFAULT 500,
+			crystal INTEGER NOT NULL DEFAULT 300,
+			gas INTEGER NOT NULL DEFAULT 200,
+			energy INTEGER NOT NULL DEFAULT 50,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+	`)
+	return err
 }
