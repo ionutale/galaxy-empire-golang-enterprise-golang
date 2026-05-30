@@ -276,6 +276,65 @@
       await loadPlanet()
     } catch (e) { error = e.message }
   }
+
+  let fleetData = null
+  let fleetShips = null
+
+  let dispatchForm = {
+    shipQuantities: {},
+    targetGalaxy: '',
+    targetSystem: '',
+    targetPosition: '',
+    mission: 'attack',
+    speed: 100
+  }
+
+  async function loadFleet() {
+    try {
+      const res = await fetch('/api/fleets', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!res.ok) throw new Error('Failed to load fleets')
+      fleetData = await res.json()
+      dispatchForm.shipQuantities = {}
+      const shipRes = await fetch('/api/shipyard', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (shipRes.ok) {
+        fleetShips = await shipRes.json()
+        fleetShips.ships.forEach(s => { dispatchForm.shipQuantities[s.type] = 0 })
+      }
+    } catch (e) { error = e.message }
+  }
+
+  async function dispatchFleet() {
+    const ships = {}
+    Object.entries(dispatchForm.shipQuantities).forEach(([type, qty]) => {
+      if (qty > 0) ships[type] = qty
+    })
+    if (Object.keys(ships).length === 0) { error = 'Select at least one ship'; return }
+    try {
+      const res = await fetch('/api/fleets/dispatch', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ships,
+          target_galaxy: parseInt(dispatchForm.targetGalaxy),
+          target_system: parseInt(dispatchForm.targetSystem),
+          target_position: parseInt(dispatchForm.targetPosition),
+          mission: dispatchForm.mission,
+          speed: dispatchForm.speed
+        })
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        error = data.error || 'Dispatch failed'
+        return
+      }
+      await loadFleet()
+      await loadPlanet()
+    } catch (e) { error = e.message }
+  }
 </script>
 
 <div class="app">
@@ -302,6 +361,7 @@
 
         <button class="galaxy-toggle" on:click={showGalaxyTab}>Galaxy</button>
         <button class="shipyard-toggle" on:click={loadShipyard}>Shipyard</button>
+        <button class="fleet-toggle" on:click={loadFleet}>Fleet</button>
 
         <div class="resources">
           <div class="res metal">
@@ -473,6 +533,89 @@
                   </div>
                 </div>
               {/each}
+            </div>
+          </div>
+        {/if}
+        {#if fleetData}
+          <div class="fleet-section">
+            <h3>My Fleets</h3>
+            {#if fleetData.fleets && fleetData.fleets.length > 0}
+              {#each fleetData.fleets as fleet}
+                <div class="fleet-card">
+                  <div class="fleet-header">
+                    <span class="fleet-id">Fleet #{fleet.id}</span>
+                    <span class="fleet-mission">{fleet.mission}</span>
+                    <span class="fleet-status">{fleet.status}</span>
+                  </div>
+                  <div class="fleet-coords">
+                    {fleet.origin_galaxy}:{fleet.origin_system}:{fleet.origin_position}
+                    &rarr;
+                    {fleet.target_galaxy}:{fleet.target_system}:{fleet.target_position}
+                  </div>
+                  <div class="fleet-ships">
+                    {#each Object.entries(fleet.ships || {}) as [type, qty]}
+                      <span class="fleet-ship">{type}: {qty}</span>
+                    {/each}
+                  </div>
+                  {#if fleet.arrives_at}
+                    <div class="fleet-arrival">Arrives: {new Date(fleet.arrives_at).toLocaleString()}</div>
+                  {/if}
+                </div>
+              {/each}
+            {:else}
+              <p class="fleet-empty">No active fleets</p>
+            {/if}
+
+            <h3>Dispatch Fleet</h3>
+            <div class="dispatch-form">
+              <div class="form-row">
+                <label>Origin</label>
+                <input type="text" value="[{planet.galaxy}:{planet.system}:{planet.position}]" disabled />
+              </div>
+              <div class="form-row">
+                <label>Target Galaxy</label>
+                <input type="number" min="1" bind:value={dispatchForm.targetGalaxy} />
+              </div>
+              <div class="form-row">
+                <label>Target System</label>
+                <input type="number" min="1" bind:value={dispatchForm.targetSystem} />
+              </div>
+              <div class="form-row">
+                <label>Target Position</label>
+                <input type="number" min="1" max="15" bind:value={dispatchForm.targetPosition} />
+              </div>
+              <div class="form-row">
+                <label>Mission</label>
+                <select bind:value={dispatchForm.mission}>
+                  <option value="attack">Attack</option>
+                  <option value="transport">Transport</option>
+                  <option value="deploy">Deploy</option>
+                  <option value="espionage">Espionage</option>
+                  <option value="colonize">Colonize</option>
+                  <option value="expedition">Expedition</option>
+                  <option value="recycle">Recycle</option>
+                </select>
+              </div>
+              <div class="form-row">
+                <label>Speed</label>
+                <div class="speed-group">
+                  <input type="range" min="10" max="100" step="10" bind:value={dispatchForm.speed} />
+                  <span class="speed-val">{dispatchForm.speed}%</span>
+                </div>
+              </div>
+              {#if fleetShips}
+                <div class="form-ships">
+                  <label>Ships</label>
+                  {#each fleetShips.ships as ship}
+                    <div class="dispatch-ship-row">
+                      <span class="dship-name">{ship.name}</span>
+                      <span class="dship-owned">Owned: {ship.quantity}</span>
+                      <input type="number" min="0" max={ship.quantity} bind:value={dispatchForm.shipQuantities[ship.type]} class="dship-qty" />
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+              <button class="btn-dispatch" on:click={dispatchFleet}>Dispatch</button>
             </div>
           </div>
         {/if}
@@ -751,4 +894,63 @@
   }
   .btn-build:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-build:hover:not(:disabled) { background: #3a6a4a; }
+
+  .fleet-toggle {
+    display: block; margin: 1rem auto; padding: 0.5rem 1rem;
+    background: #2a1a3a; border: 1px solid #4a2a6a; border-radius: 6px;
+    color: #b074d4; font-size: 0.85rem; cursor: pointer;
+  }
+  .fleet-toggle:hover { background: #3a2a4a; }
+  .fleet-section { margin-top: 1.5rem; text-align: left; }
+  .fleet-section h3 { font-size: 0.9rem; color: #8a9ab5; margin-bottom: 0.75rem; text-align: center; }
+  .fleet-card {
+    padding: 0.5rem 0.75rem; background: #1a2340; border: 1px solid #243050;
+    border-radius: 6px; margin-bottom: 0.5rem; font-size: 0.8rem;
+  }
+  .fleet-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem; }
+  .fleet-id { font-weight: 600; color: #c8d6e5; }
+  .fleet-mission {
+    font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px;
+    background: #1a2a3a; border: 1px solid #2a4a5a; color: #74a8c8;
+  }
+  .fleet-status {
+    font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px;
+    background: #1a3a2a; border: 1px solid #2a5a3a; color: #74d4a8;
+  }
+  .fleet-coords { font-family: monospace; font-size: 0.75rem; color: #5a7a9a; margin-bottom: 0.3rem; }
+  .fleet-ships { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.3rem; }
+  .fleet-ship {
+    font-size: 0.7rem; padding: 0.1rem 0.3rem; background: #0a0e1a;
+    border-radius: 3px; color: #8ab5d4;
+  }
+  .fleet-arrival { font-size: 0.7rem; color: #5aaa5a; }
+  .fleet-empty { font-size: 0.8rem; color: #5a5a6a; text-align: center; padding: 1rem; }
+  .dispatch-form { display: flex; flex-direction: column; gap: 0.5rem; }
+  .form-row { display: flex; align-items: center; gap: 0.5rem; }
+  .form-row label { width: 100px; font-size: 0.75rem; color: #8a9ab5; text-align: right; flex-shrink: 0; }
+  .form-row input, .form-row select {
+    flex: 1; padding: 0.4rem; background: #1a2340; border: 1px solid #243050;
+    border-radius: 4px; color: #c8d6e5; font-size: 0.8rem;
+  }
+  .form-row input:disabled { opacity: 0.5; }
+  .speed-group { flex: 1; display: flex; align-items: center; gap: 0.5rem; }
+  .speed-group input[type="range"] { flex: 1; }
+  .speed-val { font-size: 0.8rem; color: #8ab5d4; min-width: 40px; }
+  .form-ships { margin-top: 0.5rem; }
+  .form-ships > label { display: block; font-size: 0.75rem; color: #8a9ab5; margin-bottom: 0.3rem; }
+  .dispatch-ship-row {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.3rem 0; border-bottom: 1px solid #1a2340;
+  }
+  .dship-name { flex: 1; font-size: 0.8rem; color: #c8d6e5; }
+  .dship-owned { font-size: 0.7rem; color: #5a7a9a; }
+  .dship-qty {
+    width: 60px; padding: 0.2rem; background: #0a0e1a; border: 1px solid #243050;
+    border-radius: 3px; color: #c8d6e5; font-size: 0.75rem; text-align: center;
+  }
+  .btn-dispatch {
+    padding: 0.5rem; background: #4a2a6a; border: none;
+    border-radius: 6px; color: #c8a8e8; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  }
+  .btn-dispatch:hover { background: #5a3a7a; }
 </style>
