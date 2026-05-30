@@ -69,6 +69,7 @@ func (m *mockRepo) Create(_ context.Context, userID int) (Planet, []Building, er
 		"metal_mine", "crystal_mine", "gas_mine", "solar_plant",
 		"metal_storage", "crystal_storage", "gas_storage",
 		"robotics_factory", "nanite_factory", "terraformer", "fusion_reactor",
+		"shipyard",
 	}
 	buildings := make([]Building, 0, len(seedTypes))
 	for _, t := range seedTypes {
@@ -361,8 +362,8 @@ func TestGetOrCreate_FirstCallCreatesWithBuildings(t *testing.T) {
 	if p.UserID != 42 {
 		t.Errorf("expected user_id 42, got %d", p.UserID)
 	}
-	if len(buildings) != 11 {
-		t.Errorf("expected 11 buildings, got %d", len(buildings))
+	if len(buildings) != 12 {
+		t.Errorf("expected 12 buildings, got %d", len(buildings))
 	}
 }
 
@@ -1323,5 +1324,96 @@ func TestHandler_GetPositions_InvalidSystem(t *testing.T) {
 	h.GetPositions(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 for invalid system ID, got %d", w.Code)
+	}
+}
+
+func TestShipConfigs(t *testing.T) {
+	if len(Ships) != 12 {
+		t.Errorf("expected 12 ships, got %d", len(Ships))
+	}
+	for _, s := range Ships {
+		if s.Type == "" || s.Name == "" {
+			t.Errorf("ship missing type or name: %+v", s)
+		}
+	}
+}
+
+func TestBuildShips_Valid(t *testing.T) {
+	mock := newMockRepo()
+	svc := NewPlanetService(mock)
+	planet, _, err := svc.GetOrCreatePlanet(context.Background(), 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	planet.Metal = 50000
+	planet.Crystal = 50000
+	planet.Gas = 50000
+	mock.planets[planet.ID] = planet
+
+	quantity, err := svc.BuildShips(context.Background(), planet.ID, "cargo", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quantity != 5 {
+		t.Errorf("expected 5, got %d", quantity)
+	}
+
+	planet, _ = mock.FindByID(context.Background(), planet.ID)
+	cost := Ships[0].Metal * 5
+	expectedMetal := 50000 - cost
+	if planet.Metal != expectedMetal {
+		t.Errorf("expected metal %d, got %d", expectedMetal, planet.Metal)
+	}
+}
+
+func TestBuildShips_InsufficientResources(t *testing.T) {
+	mock := newMockRepo()
+	svc := NewPlanetService(mock)
+	planet, _, err := svc.GetOrCreatePlanet(context.Background(), 81)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	planet.Metal = 0
+	mock.planets[planet.ID] = planet
+
+	_, err = svc.BuildShips(context.Background(), planet.ID, "dreadnought", 1)
+	if err != ErrInsufficientResources {
+		t.Errorf("expected ErrInsufficientResources, got %v", err)
+	}
+}
+
+func TestBuildShips_InvalidShip(t *testing.T) {
+	mock := newMockRepo()
+	svc := NewPlanetService(mock)
+	planet, _, err := svc.GetOrCreatePlanet(context.Background(), 82)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.BuildShips(context.Background(), planet.ID, "death_star", 1)
+	if err != ErrInvalidShip {
+		t.Errorf("expected ErrInvalidShip, got %v", err)
+	}
+}
+
+func TestBuildShips_NoShipyard(t *testing.T) {
+	mock := newMockRepo()
+	svc := NewPlanetService(mock)
+	planet, _, err := svc.GetOrCreatePlanet(context.Background(), 83)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i, b := range mock.buildings[planet.ID] {
+		if b.Type == "shipyard" {
+			mock.buildings[planet.ID][i].Level = 0
+		}
+	}
+
+	_, err = svc.BuildShips(context.Background(), planet.ID, "cargo", 1)
+	if err != ErrNoShipyard {
+		t.Errorf("expected ErrNoShipyard, got %v", err)
 	}
 }
