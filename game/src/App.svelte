@@ -247,6 +247,7 @@
 
   let shipyardData = null
   let buildQuantities = {}
+  let lastBuildResult = null
 
   async function loadShipyard() {
     try {
@@ -272,9 +273,34 @@
         error = data.error || 'Build failed'
         return
       }
+      lastBuildResult = await res.json()
       await loadShipyard()
       await loadPlanet()
+      setTimeout(() => { lastBuildResult = null }, 5000)
     } catch (e) { error = e.message }
+  }
+
+  function setQuantity(shipType, qty) {
+    buildQuantities[shipType] = Math.max(1, qty)
+    buildQuantities = buildQuantities
+  }
+
+  function maxAfford(ship) {
+    if (!planet) return 1
+    let max = 999999999
+    if (ship.metal > 0) max = Math.min(max, Math.floor(planet.metal / ship.metal))
+    if (ship.crystal > 0) max = Math.min(max, Math.floor(planet.crystal / ship.crystal))
+    if (ship.gas > 0) max = Math.min(max, Math.floor(planet.gas / ship.gas))
+    return max
+  }
+
+  function formatBuildTime(seconds) {
+    if (!seconds || seconds <= 0) return ''
+    if (seconds < 60) return `${Math.round(seconds)}s`
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+    const h = Math.floor(seconds / 3600)
+    const m = Math.floor((seconds % 3600) / 60)
+    return `${h}h ${m}m`
   }
 
   let fleetData = null
@@ -528,8 +554,21 @@
                     {/if}
                   </div>
                   <div class="ship-build">
-                    <input type="number" min="1" bind:value={buildQuantities[ship.type]} class="qty-input" />
-                    <button class="btn-build" disabled={!canAffordShip(ship)} on:click={() => buildShips(ship.type)}>Build</button>
+                    <div class="qty-buttons">
+                      <button class="qty-btn" on:click={() => setQuantity(ship.type, 1)}>1</button>
+                      <button class="qty-btn" on:click={() => setQuantity(ship.type, 10)}>10</button>
+                      <button class="qty-btn" on:click={() => setQuantity(ship.type, 100)}>100</button>
+                      <button class="qty-btn" on:click={() => setQuantity(ship.type, maxAfford(ship))}>Max</button>
+                    </div>
+                    <div class="qty-input-row">
+                      <input type="number" min="1" bind:value={buildQuantities[ship.type]} class="qty-input" />
+                      <button class="btn-build" on:click={() => buildShips(ship.type)}>Build</button>
+                    </div>
+                    {#if lastBuildResult && lastBuildResult.type === ship.type}
+                      <div class="build-result">
+                        Built {lastBuildResult.quantity} in {formatBuildTime(lastBuildResult.build_time_seconds)}
+                      </div>
+                    {/if}
                   </div>
                 </div>
               {/each}
@@ -883,7 +922,14 @@
   .cost.metal { color: #d4a574; }
   .cost.crystal { color: #74a8d4; }
   .cost.gas { color: #74d4a8; }
-  .ship-build { display: flex; gap: 0.25rem; }
+  .ship-build { display: flex; flex-direction: column; gap: 0.25rem; }
+  .qty-buttons { display: flex; gap: 0.2rem; }
+  .qty-btn {
+    flex: 1; padding: 0.15rem 0; background: #0a0e1a; border: 1px solid #243050;
+    border-radius: 3px; color: #5a7a9a; font-size: 0.65rem; cursor: pointer;
+  }
+  .qty-btn:hover { background: #1a2a4a; color: #8ab5d4; }
+  .qty-input-row { display: flex; gap: 0.25rem; }
   .qty-input {
     width: 50px; padding: 0.2rem; background: #0a0e1a; border: 1px solid #243050;
     border-radius: 3px; color: #c8d6e5; font-size: 0.75rem; text-align: center;
@@ -894,6 +940,7 @@
   }
   .btn-build:disabled { opacity: 0.4; cursor: not-allowed; }
   .btn-build:hover:not(:disabled) { background: #3a6a4a; }
+  .build-result { font-size: 0.65rem; color: #74d4a8; text-align: center; }
 
   .fleet-toggle {
     display: block; margin: 1rem auto; padding: 0.5rem 1rem;

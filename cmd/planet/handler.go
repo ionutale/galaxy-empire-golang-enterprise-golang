@@ -334,7 +334,7 @@ func (h *Handler) BuildShips(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quantity, err := h.service.BuildShips(r.Context(), planet.ID, req.ShipType, req.Quantity)
+	quantity, buildTime, err := h.service.BuildShips(r.Context(), planet.ID, req.ShipType, req.Quantity)
 	if err != nil {
 		slog.Error("build ships failed", "ship_type", req.ShipType, "error", err)
 		msg := "internal error"
@@ -354,9 +354,13 @@ func (h *Handler) BuildShips(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	maxQty, _ := h.service.MaxShipQuantity(r.Context(), planet.ID, req.ShipType)
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"type":     req.ShipType,
-		"quantity": quantity,
+		"type":              req.ShipType,
+		"quantity":          quantity,
+		"build_time_seconds": buildTime,
+		"max_quantity":      maxQty,
 	})
 }
 

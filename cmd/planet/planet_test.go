@@ -1355,12 +1355,15 @@ func TestBuildShips_Valid(t *testing.T) {
 	planet.Gas = 50000
 	mock.planets[planet.ID] = planet
 
-	quantity, err := svc.BuildShips(context.Background(), planet.ID, "cargo", 5)
+	quantity, buildTime, err := svc.BuildShips(context.Background(), planet.ID, "cargo", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if quantity != 5 {
 		t.Errorf("expected 5, got %d", quantity)
+	}
+	if buildTime < 0 {
+		t.Errorf("expected positive build time, got %f", buildTime)
 	}
 
 	planet, _ = mock.FindByID(context.Background(), planet.ID)
@@ -1382,9 +1385,26 @@ func TestBuildShips_InsufficientResources(t *testing.T) {
 	planet.Metal = 0
 	mock.planets[planet.ID] = planet
 
-	_, err = svc.BuildShips(context.Background(), planet.ID, "dreadnought", 1)
+	_, _, err = svc.BuildShips(context.Background(), planet.ID, "dreadnought", 1)
 	if err != ErrInsufficientResources {
 		t.Errorf("expected ErrInsufficientResources, got %v", err)
+	}
+}
+
+func TestBuildShips_MaxQuantity(t *testing.T) {
+	mock := newMockRepo()
+	svc := NewPlanetService(mock)
+	planet, _, err := svc.GetOrCreatePlanet(context.Background(), 84)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxQ, err := svc.MaxShipQuantity(context.Background(), planet.ID, "cargo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := planet.Metal / 2000
+	if maxQ != expected {
+		t.Errorf("expected max %d, got %d", expected, maxQ)
 	}
 }
 
@@ -1396,7 +1416,7 @@ func TestBuildShips_InvalidShip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = svc.BuildShips(context.Background(), planet.ID, "death_star", 1)
+	_, _, err = svc.BuildShips(context.Background(), planet.ID, "death_star", 1)
 	if err != ErrInvalidShip {
 		t.Errorf("expected ErrInvalidShip, got %v", err)
 	}
@@ -1416,7 +1436,7 @@ func TestBuildShips_NoShipyard(t *testing.T) {
 		}
 	}
 
-	_, err = svc.BuildShips(context.Background(), planet.ID, "cargo", 1)
+	_, _, err = svc.BuildShips(context.Background(), planet.ID, "cargo", 1)
 	if err != ErrNoShipyard {
 		t.Errorf("expected ErrNoShipyard, got %v", err)
 	}
