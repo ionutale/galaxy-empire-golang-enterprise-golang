@@ -15,6 +15,8 @@ var ErrAlreadyQueued = errors.New("building already in queue")
 var ErrInvalidBuilding = errors.New("invalid building type")
 var ErrNoFieldsAvailable = errors.New("no fields available for construction")
 var ErrNoActiveUpgrade = errors.New("no active upgrade for this building")
+var ErrAlreadyDeconstructing = errors.New("building already queued for deconstruction")
+var ErrBuildingNotFound = errors.New("building not found")
 
 type PlanetService struct {
 	repo Repository
@@ -71,17 +73,37 @@ func (s *PlanetService) processCompletedBuilds(ctx context.Context, planetID int
 	now := time.Now()
 	for _, q := range queue {
 		if now.After(q.CompletesAt) {
-			if err := s.repo.CompleteBuild(ctx, q.ID, q.BuildingType, q.TargetLevel); err != nil {
-				return err
-			}
-			if q.BuildingType == "terraformer" {
-				if err := s.repo.UpdateMaxFields(ctx, planetID, baseMaxFields+terraformerFields(q.TargetLevel)); err != nil {
+			if q.Status == "deconstruct" {
+				if err := s.handleDeconstructCompletion(ctx, planetID, q); err != nil {
 					return err
+				}
+			} else {
+				if err := s.repo.CompleteBuild(ctx, q.ID, q.BuildingType, q.TargetLevel); err != nil {
+					return err
+				}
+				if q.BuildingType == "terraformer" {
+					if err := s.repo.UpdateMaxFields(ctx, planetID, baseMaxFields+terraformerFields(q.TargetLevel)); err != nil {
+						return err
+					}
 				}
 			}
 		}
 	}
 	return nil
+}
+
+func (s *PlanetService) handleDeconstructCompletion(ctx context.Context, planetID int, q QueueEntry) error {
+	metalCost, crystalCost, gasCost := buildingCostResources(q.BuildingType, q.TargetLevel)
+	refundMetal := metalCost / 2
+	refundCrystal := crystalCost / 2
+	refundGas := gasCost / 2
+
+	var maxFields int
+	if q.BuildingType == "terraformer" {
+		maxFields = baseMaxFields + terraformerFields(q.TargetLevel)
+	}
+
+	return s.repo.DeconstructComplete(ctx, planetID, q.ID, q.BuildingType, q.TargetLevel, refundMetal, refundCrystal, refundGas, maxFields)
 }
 
 func (s *PlanetService) StartBuildingUpgrade(ctx context.Context, planetID int, buildingType string) (QueueEntry, error) {
@@ -159,6 +181,41 @@ func (s *PlanetService) CancelUpgrade(ctx context.Context, planetID int, buildin
 	refundGas := gasCost / 2
 
 	return s.repo.CancelUpgradeWithRefund(ctx, planetID, targetEntry.ID, refundMetal, refundCrystal, refundGas)
+}
+
+func (s *PlanetService) QueueDeconstruction(ctx context.Context, planetID int, buildingType string) (QueueEntry, error) {
+	currentLevel, err := s.repo.GetBuildingLevel(ctx, planetID, buildingType)
+	if err != nil {
+		return QueueEntry{}, ErrBuildingNotFound
+	}
+	if currentLevel < 1 {
+		return QueueEntry{}, ErrBuildingNotFound
+	}
+
+	queue, err := s.repo.GetActiveQueue(ctx, planetID)
+	if err != nil {
+		return QueueEntry{}, err
+	}
+	for _, q := range queue {
+		if q.BuildingType == buildingType {
+			if q.Status == "deconstruct" {
+				return QueueEntry{}, ErrAlreadyDeconstructing
+			}
+			return QueueEntry{}, ErrAlreadyQueued
+		}
+	}
+
+	roboticsLevel, _ := s.repo.GetBuildingLevel(ctx, planetID, "robotics_factory")
+	naniteLevel, _ := s.repo.GetBuildingLevel(ctx, planetID, "nanite_factory")
+	duration := buildingBuildDuration(buildingType, currentLevel-1, roboticsLevel, naniteLevel) / 2
+	completesAt := time.Now().Add(duration)
+
+	entry, err := s.repo.CreateQueueEntryDeconstruct(ctx, planetID, buildingType, currentLevel-1, completesAt)
+	if err != nil {
+		return QueueEntry{}, err
+	}
+
+	return entry, nil
 }
 
 func buildingCostResources(buildingType string, currentLevel int) (metal, crystal, gas int) {

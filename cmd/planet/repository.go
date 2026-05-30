@@ -28,6 +28,7 @@ type Repository interface {
 	CancelUpgradeWithRefund(ctx context.Context, planetID, queueID, refundMetal, refundCrystal, refundGas int) error
 	DeleteBuilding(ctx context.Context, planetID int, buildingType string) error
 	UpdateBuildingLevel(ctx context.Context, planetID int, buildingType string, level int) error
+	DeconstructComplete(ctx context.Context, planetID, queueID int, buildingType string, targetLevel int, refundMetal, refundCrystal, refundGas, maxFields int) error
 }
 
 type PostgresRepository struct {
@@ -282,6 +283,54 @@ func (r *PostgresRepository) CreateQueueEntryDeconstruct(ctx context.Context, pl
 		return QueueEntry{}, fmt.Errorf("create deconstruct entry: %w", err)
 	}
 	return q, nil
+}
+
+func (r *PostgresRepository) DeconstructComplete(ctx context.Context, planetID, queueID int, buildingType string, targetLevel int, refundMetal, refundCrystal, refundGas, maxFields int) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE planet.planets SET metal = metal + $1, crystal = crystal + $2, gas = gas + $3, resources_updated_at = NOW() WHERE id = $4`,
+		refundMetal, refundCrystal, refundGas, planetID,
+	); err != nil {
+		return fmt.Errorf("refund resources: %w", err)
+	}
+
+	if targetLevel == 0 {
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM planet.buildings WHERE planet_id = $1 AND type = $2`,
+			planetID, buildingType,
+		); err != nil {
+			return fmt.Errorf("delete building: %w", err)
+		}
+	} else {
+		if _, err := tx.Exec(ctx,
+			`UPDATE planet.buildings SET level = $1 WHERE planet_id = $2 AND type = $3`,
+			targetLevel, planetID, buildingType,
+		); err != nil {
+			return fmt.Errorf("update building level: %w", err)
+		}
+	}
+
+	if maxFields > 0 {
+		if _, err := tx.Exec(ctx,
+			`UPDATE planet.planets SET max_fields = $1 WHERE id = $2`,
+			maxFields, planetID,
+		); err != nil {
+			return fmt.Errorf("update max fields: %w", err)
+		}
+	}
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM planet.construction_queue WHERE id = $1 AND completed = FALSE`, queueID,
+	); err != nil {
+		return fmt.Errorf("cancel queue entry: %w", err)
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *PostgresRepository) CompleteBuild(ctx context.Context, queueID int, buildingType string, targetLevel int) error {

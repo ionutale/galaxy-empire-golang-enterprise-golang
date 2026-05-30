@@ -18,6 +18,7 @@ func setupTestRouter(h *Handler) http.Handler {
 	r.Get("/api/planet/mine", h.GetMyPlanet)
 	r.Post("/api/buildings/{type}/upgrade", h.StartUpgrade)
 	r.Post("/api/buildings/{type}/cancel", h.CancelUpgrade)
+	r.Post("/api/buildings/{type}/deconstruct", h.DeconstructBuilding)
 	return r
 }
 
@@ -174,6 +175,36 @@ func TestCancelUpgrade_Success(t *testing.T) {
 func TestCancelUpgrade_NoActiveUpgrade(t *testing.T) {
 	router := setupTestRouter(setupTestHandler())
 	req := httptest.NewRequest("POST", "/api/buildings/metal_mine/cancel", nil)
+	req.Header.Set("X-User-ID", "1")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestDeconstructBuilding_Success(t *testing.T) {
+	router := setupTestRouter(setupTestHandler())
+	req := httptest.NewRequest("POST", "/api/buildings/metal_mine/deconstruct", nil)
+	req.Header.Set("X-User-ID", "1")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var entry QueueEntry
+	if err := json.NewDecoder(rec.Body).Decode(&entry); err != nil {
+		t.Fatal("decode queue entry:", err)
+	}
+	if entry.Status != "deconstruct" {
+		t.Errorf("expected status deconstruct, got %s", entry.Status)
+	}
+}
+
+func TestDeconstructBuilding_NotFound(t *testing.T) {
+	router := setupTestRouter(setupTestHandler())
+	req := httptest.NewRequest("POST", "/api/buildings/nonexistent/deconstruct", nil)
 	req.Header.Set("X-User-ID", "1")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

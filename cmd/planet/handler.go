@@ -141,6 +141,54 @@ func (h *Handler) CancelUpgrade(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (h *Handler) DeconstructBuilding(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid user"})
+		return
+	}
+
+	buildingType := chi.URLParam(r, "type")
+	if buildingType == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing building type"})
+		return
+	}
+
+	planet, _, err := h.service.GetOrCreatePlanet(r.Context(), userID)
+	if err != nil {
+		slog.Error("get planet failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	entry, err := h.service.QueueDeconstruction(r.Context(), planet.ID, buildingType)
+	if err != nil {
+		slog.Error("deconstruct failed", "building", buildingType, "error", err)
+		code := http.StatusInternalServerError
+		msg := "internal error"
+		switch {
+		case errors.Is(err, ErrBuildingNotFound):
+			code = http.StatusBadRequest
+			msg = "building not found"
+		case errors.Is(err, ErrAlreadyDeconstructing):
+			code = http.StatusConflict
+			msg = "building already queued for deconstruction"
+		case errors.Is(err, ErrAlreadyQueued):
+			code = http.StatusConflict
+			msg = "building is currently being upgraded"
+		}
+		writeJSON(w, code, map[string]string{"error": msg})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, entry)
+}
+
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

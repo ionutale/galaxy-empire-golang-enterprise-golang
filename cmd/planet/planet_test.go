@@ -155,6 +155,32 @@ func (m *mockRepo) CancelUpgradeWithRefund(ctx context.Context, planetID, queueI
 	return m.CancelQueueEntry(ctx, queueID)
 }
 
+func (m *mockRepo) DeconstructComplete(ctx context.Context, planetID, queueID int, buildingType string, targetLevel int, refundMetal, refundCrystal, refundGas, maxFields int) error {
+	p, ok := m.planets[planetID]
+	if !ok {
+		return ErrPlanetNotFound
+	}
+	p.Metal += refundMetal
+	p.Crystal += refundCrystal
+	p.Gas += refundGas
+	if maxFields > 0 {
+		p.MaxFields = maxFields
+	}
+	m.planets[planetID] = p
+
+	if targetLevel == 0 {
+		if err := m.DeleteBuilding(ctx, planetID, buildingType); err != nil {
+			return err
+		}
+	} else {
+		if err := m.UpdateBuildingLevel(ctx, planetID, buildingType, targetLevel); err != nil {
+			return err
+		}
+	}
+
+	return m.CancelQueueEntry(ctx, queueID)
+}
+
 func (m *mockRepo) CancelQueueEntry(_ context.Context, queueID int) error {
 	for pid, entries := range m.queue {
 		for i, q := range entries {
@@ -668,5 +694,91 @@ func TestService_CancelUpgrade_NoActiveUpgrade(t *testing.T) {
 	err = svc.CancelUpgrade(context.Background(), planet.ID, "metal_mine")
 	if err == nil {
 		t.Error("expected error for no active upgrade")
+	}
+}
+
+func TestService_QueueDeconstruction_CreatesQueueEntry(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entry, err := svc.QueueDeconstruction(context.Background(), planet.ID, buildings[0].Type)
+	if err != nil {
+		t.Fatal("queue deconstruction:", err)
+	}
+	if entry.Status != "deconstruct" {
+		t.Errorf("expected status deconstruct, got %s", entry.Status)
+	}
+	if entry.TargetLevel != 0 {
+		t.Errorf("expected target level 0, got %d", entry.TargetLevel)
+	}
+}
+
+func TestService_QueueDeconstruction_BuildingNotFound(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	planet, _, err := svc.GetOrCreatePlanet(context.Background(), 21)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.QueueDeconstruction(context.Background(), planet.ID, "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent building")
+	}
+}
+
+func TestService_ProcessDeconstructCompletion_RemovesBuilding(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	mock := svc.repo.(*mockRepo)
+	planet, buildings, err := svc.GetOrCreatePlanet(context.Background(), 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	initialMetal := planet.Metal
+	initialCrystal := planet.Crystal
+	initialGas := planet.Gas
+	initialCount := len(buildings)
+	buildingType := buildings[0].Type
+
+	entry, err := svc.QueueDeconstruction(context.Background(), planet.ID, buildingType)
+	if err != nil {
+		t.Fatal("queue deconstruction:", err)
+	}
+
+	for i, q := range mock.queue[planet.ID] {
+		if q.ID == entry.ID {
+			mock.queue[planet.ID][i].CompletesAt = time.Now().Add(-1 * time.Second)
+			break
+		}
+	}
+
+	// Get the building level before deconstruction (should be 1)
+	buildingLevel, _ := mock.GetBuildingLevel(context.Background(), planet.ID, buildingType)
+	expectedRefundMetal, expectedRefundCrystal, expectedRefundGas := buildingCostResources(buildingType, buildingLevel-1)
+	expectedRefundMetal /= 2
+	expectedRefundCrystal /= 2
+	expectedRefundGas /= 2
+
+	err = svc.processCompletedBuilds(context.Background(), planet.ID)
+	if err != nil {
+		t.Fatal("process builds:", err)
+	}
+
+	updatedPlanet := mock.planets[planet.ID]
+	if updatedPlanet.Metal != initialMetal+expectedRefundMetal {
+		t.Errorf("expected metal %d, got %d", initialMetal+expectedRefundMetal, updatedPlanet.Metal)
+	}
+	if updatedPlanet.Crystal != initialCrystal+expectedRefundCrystal {
+		t.Errorf("expected crystal %d, got %d", initialCrystal+expectedRefundCrystal, updatedPlanet.Crystal)
+	}
+	if updatedPlanet.Gas != initialGas+expectedRefundGas {
+		t.Errorf("expected gas %d, got %d", initialGas+expectedRefundGas, updatedPlanet.Gas)
+	}
+
+	updatedBuildings, _ := mock.GetBuildings(context.Background(), planet.ID)
+	if len(updatedBuildings) != initialCount-1 {
+		t.Errorf("expected %d buildings, got %d", initialCount-1, len(updatedBuildings))
 	}
 }
