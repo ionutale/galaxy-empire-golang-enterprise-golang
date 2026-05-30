@@ -45,7 +45,7 @@ func (h *Handler) GetMyPlanet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	netEnergy, efficiency := calculatePenaltyFactor(buildings)
-	prod := h.service.calculateProduction(buildings, efficiency)
+	prod := h.service.calculateProduction(buildings, efficiency, planet.Type, planet.Temperature)
 	storage := h.service.calculateStorage(buildings)
 	planet.Energy = netEnergy
 	resp := toPlanetResponse(planet, buildings, prod, storage, queue)

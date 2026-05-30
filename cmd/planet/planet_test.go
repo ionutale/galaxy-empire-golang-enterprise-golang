@@ -338,13 +338,54 @@ func TestCalculateProduction(t *testing.T) {
 		{Type: "gas_mine", Level: 1},
 		{Type: "solar_plant", Level: 3},
 	}
-	prod := svc.calculateProduction(buildings, 1.0)
+	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15)
 	if prod.Metal <= 0 {
 		t.Error("expected positive metal production")
 	}
 	rounded := math.Round(prod.Metal * 60)
 	if rounded != 33 {
 		t.Errorf("metal L1 should produce 33/min, got %.2f/min", prod.Metal*60)
+	}
+}
+
+func TestCalculateProduction_TemperatureBonus_ColdPlanet(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	buildings := []Building{
+		{Type: "gas_mine", Level: 1},
+		{Type: "solar_plant", Level: 1},
+	}
+	// Ice planet, cold: gas gets +1.5 effective levels
+	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeIce, -30)
+	gasPerMin := prod.Gas * 60
+	if gasPerMin <= 11 {
+		t.Errorf("gas on cold planet should get temperature bonus, got %.2f/min", gasPerMin)
+	}
+}
+
+func TestCalculateProduction_TemperatureBonus_HotPlanet(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	buildings := []Building{
+		{Type: "gas_mine", Level: 1},
+		{Type: "solar_plant", Level: 1},
+	}
+	// Desert planet, hot: solar gets +1.5 effective levels
+	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeDesert, 80)
+	solarPerMin := prod.Energy * 60
+	if solarPerMin <= 44 {
+		t.Errorf("solar on hot planet should get temperature bonus, got %.2f/min", solarPerMin)
+	}
+}
+
+func TestCalculateProduction_NoBonus_Terran(t *testing.T) {
+	svc := NewPlanetService(newMockRepo())
+	buildings := []Building{
+		{Type: "gas_mine", Level: 1},
+		{Type: "solar_plant", Level: 1},
+	}
+	prod := svc.calculateProduction(buildings, 1.0, PlanetTypeTerran, 15)
+	gasPerMin := prod.Gas * 60
+	if gasPerMin < 10 || gasPerMin > 12 {
+		t.Errorf("gas on terran should have no bonus, got %.2f/min", gasPerMin)
 	}
 }
 
@@ -355,7 +396,7 @@ func TestCalculateProduction_WithPenalty(t *testing.T) {
 		{Type: "crystal_mine", Level: 5},
 		{Type: "gas_mine", Level: 5},
 	}
-	prod := svc.calculateProduction(buildings, 0.5)
+	prod := svc.calculateProduction(buildings, 0.5, PlanetTypeTerran, 15)
 	if prod.Metal <= 0 {
 		t.Error("expected positive metal production even with penalty")
 	}
