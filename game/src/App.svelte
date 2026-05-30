@@ -113,6 +113,12 @@
     return planet.metal >= cost.metal && planet.crystal >= (cost.crystal || 0) && planet.gas >= (cost.gas || 0)
   }
 
+  function canAffordShip(ship) {
+    if (!planet) return false
+    const qty = buildQuantities[ship.type] || 1
+    return planet.metal >= ship.metal * qty && planet.crystal >= ship.crystal * qty && planet.gas >= ship.gas * qty
+  }
+
   function isQueued(type) {
     return planet && planet.queue && planet.queue.some(q => q.building_type === type)
   }
@@ -238,6 +244,38 @@
   }
 
   let selectedGalaxy = 1
+
+  let shipyardData = null
+  let buildQuantities = {}
+
+  async function loadShipyard() {
+    try {
+      const res = await fetch('/api/shipyard', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!res.ok) throw new Error('Failed to load shipyard')
+      shipyardData = await res.json()
+      shipyardData.ships.forEach(s => { buildQuantities[s.type] = buildQuantities[s.type] || 1 })
+    } catch (e) { error = e.message }
+  }
+
+  async function buildShips(shipType) {
+    const qty = buildQuantities[shipType] || 1
+    try {
+      const res = await fetch('/api/shipyard/build', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ship_type: shipType, quantity: qty })
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        error = data.error || 'Build failed'
+        return
+      }
+      await loadShipyard()
+      await loadPlanet()
+    } catch (e) { error = e.message }
+  }
 </script>
 
 <div class="app">
@@ -263,6 +301,7 @@
         </div>
 
         <button class="galaxy-toggle" on:click={showGalaxyTab}>Galaxy</button>
+        <button class="shipyard-toggle" on:click={loadShipyard}>Shipyard</button>
 
         <div class="resources">
           <div class="res metal">
@@ -402,6 +441,38 @@
               <button disabled={galaxyPage <= 1} on:click={galaxyPagePrev}>Prev</button>
               <span>Page {galaxyPage} of {galaxyData.total_pages}</span>
               <button disabled={galaxyPage >= galaxyData.total_pages} on:click={galaxyPageNext}>Next</button>
+            </div>
+          </div>
+        {/if}
+
+        {#if shipyardData}
+          <div class="shipyard-section">
+            <h3>Shipyard {shipyardData.shipyard_level > 0 ? `Lv.${shipyardData.shipyard_level}` : '(not built)'}</h3>
+            <div class="ship-grid">
+              {#each shipyardData.ships as ship}
+                <div class="ship-card">
+                  <div class="ship-header">
+                    <span class="ship-name">{ship.name}</span>
+                    <span class="ship-qty">Owned: {ship.quantity}</span>
+                  </div>
+                  <div class="ship-stats">
+                    <span class="stat">⚡{ship.speed}</span>
+                    <span class="stat">📦{ship.cargo}</span>
+                    <span class="stat">⛽{ship.fuel}</span>
+                  </div>
+                  <div class="ship-cost">
+                    <span class="cost metal">M {ship.metal}</span>
+                    <span class="cost crystal">C {ship.crystal}</span>
+                    {#if ship.gas > 0}
+                      <span class="cost gas">G {ship.gas}</span>
+                    {/if}
+                  </div>
+                  <div class="ship-build">
+                    <input type="number" min="1" bind:value={buildQuantities[ship.type]} class="qty-input" />
+                    <button class="btn-build" disabled={!canAffordShip(ship)} on:click={() => buildShips(ship.type)}>Build</button>
+                  </div>
+                </div>
+              {/each}
             </div>
           </div>
         {/if}
@@ -647,4 +718,37 @@
   .pos-name { display: block; color: #8ac88a; }
   .pos-player { display: block; font-size: 0.65rem; color: #5a7a9a; }
   .pos-empty { color: #5a5a6a; font-style: italic; }
+
+  .shipyard-toggle {
+    display: block; margin: 1rem auto; padding: 0.5rem 1rem;
+    background: #2a3a1a; border: 1px solid #4a6a2a; border-radius: 6px;
+    color: #8ad474; font-size: 0.85rem; cursor: pointer;
+  }
+  .shipyard-toggle:hover { background: #3a4a2a; }
+  .shipyard-section { margin-top: 1.5rem; }
+  .shipyard-section h3 { font-size: 0.9rem; color: #8a9ab5; margin-bottom: 0.75rem; text-align: center; }
+  .ship-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+  .ship-card {
+    padding: 0.5rem; background: #1a2340; border: 1px solid #243050;
+    border-radius: 6px; font-size: 0.8rem;
+  }
+  .ship-header { display: flex; justify-content: space-between; margin-bottom: 0.3rem; }
+  .ship-name { font-weight: 600; color: #c8d6e5; }
+  .ship-qty { font-size: 0.7rem; color: #5a7a9a; }
+  .ship-stats { display: flex; gap: 0.5rem; font-size: 0.7rem; color: #8ab5d4; margin-bottom: 0.3rem; }
+  .ship-cost { display: flex; gap: 0.5rem; font-size: 0.7rem; margin-bottom: 0.3rem; }
+  .cost.metal { color: #d4a574; }
+  .cost.crystal { color: #74a8d4; }
+  .cost.gas { color: #74d4a8; }
+  .ship-build { display: flex; gap: 0.25rem; }
+  .qty-input {
+    width: 50px; padding: 0.2rem; background: #0a0e1a; border: 1px solid #243050;
+    border-radius: 3px; color: #c8d6e5; font-size: 0.75rem; text-align: center;
+  }
+  .btn-build {
+    flex: 1; padding: 0.25rem; background: #2a5a3a; border: none;
+    border-radius: 3px; color: #a8e8a8; font-size: 0.7rem; cursor: pointer;
+  }
+  .btn-build:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-build:hover:not(:disabled) { background: #3a6a4a; }
 </style>
