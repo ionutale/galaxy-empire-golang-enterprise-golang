@@ -33,6 +33,9 @@ type Repository interface {
 	GetPlayerProgress(ctx context.Context, planetID int) (vipPoints int, totalResources int, err error)
 	AddVIPPoints(ctx context.Context, planetID int, points int) error
 	AddResourcesProduced(ctx context.Context, planetID int, amount int) error
+	ListGalaxies(ctx context.Context) ([]Galaxy, error)
+	ListSystems(ctx context.Context, galaxyID int, page, pageSize int) ([]System, int, error)
+	GetSystemPositions(ctx context.Context, systemID int) ([]Position, error)
 }
 
 type PostgresRepository struct {
@@ -415,6 +418,93 @@ func (r *PostgresRepository) AddResourcesProduced(ctx context.Context, planetID 
 		return fmt.Errorf("add resources produced: %w", err)
 	}
 	return nil
+}
+
+func (r *PostgresRepository) ListGalaxies(ctx context.Context) ([]Galaxy, error) {
+	rows, err := r.pool.Query(ctx, `SELECT id, name FROM galaxy.galaxies ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("list galaxies: %w", err)
+	}
+	defer rows.Close()
+
+	var galaxies []Galaxy
+	for rows.Next() {
+		var g Galaxy
+		if err := rows.Scan(&g.ID, &g.Name); err != nil {
+			return nil, fmt.Errorf("scan galaxy: %w", err)
+		}
+		galaxies = append(galaxies, g)
+	}
+	return galaxies, rows.Err()
+}
+
+func (r *PostgresRepository) ListSystems(ctx context.Context, galaxyID int, page, pageSize int) ([]System, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	}
+
+	var total int
+	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM galaxy.systems WHERE galaxy_id = $1`, galaxyID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count systems: %w", err)
+	}
+
+	offset := (page - 1) * pageSize
+	rows, err := r.pool.Query(ctx, `
+		SELECT s.id, s.system_num,
+			(SELECT COUNT(*) FROM planet.planets pl WHERE pl.galaxy = s.galaxy_id AND pl.system = s.system_num) AS occupied_count
+		FROM galaxy.systems s
+		WHERE s.galaxy_id = $1
+		ORDER BY s.system_num
+		LIMIT $2 OFFSET $3
+	`, galaxyID, pageSize, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list systems: %w", err)
+	}
+	defer rows.Close()
+
+	var systems []System
+	for rows.Next() {
+		var s System
+		if err := rows.Scan(&s.ID, &s.SystemNum, &s.OccupiedCount); err != nil {
+			return nil, 0, fmt.Errorf("scan system: %w", err)
+		}
+		systems = append(systems, s)
+	}
+	return systems, total, rows.Err()
+}
+
+func (r *PostgresRepository) GetSystemPositions(ctx context.Context, systemID int) ([]Position, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT p.position_num,
+			CASE WHEN pl.id IS NOT NULL THEN 'occupied' ELSE 'empty' END AS state,
+			COALESCE(pl.name, '') AS planet_name,
+			COALESCE(pl.user_id, 0) AS player_id
+		FROM galaxy.positions p
+		JOIN galaxy.systems s ON p.system_id = s.id
+		LEFT JOIN planet.planets pl
+			ON pl.galaxy = s.galaxy_id
+			AND pl.system = s.system_num
+			AND pl.position = p.position_num
+		WHERE p.system_id = $1
+		ORDER BY p.position_num
+	`, systemID)
+	if err != nil {
+		return nil, fmt.Errorf("get positions: %w", err)
+	}
+	defer rows.Close()
+
+	var positions []Position
+	for rows.Next() {
+		var pos Position
+		if err := rows.Scan(&pos.PositionNum, &pos.State, &pos.PlanetName, &pos.PlayerID); err != nil {
+			return nil, fmt.Errorf("scan position: %w", err)
+		}
+		positions = append(positions, pos)
+	}
+	return positions, rows.Err()
 }
 
 func (r *PostgresRepository) CompleteBuild(ctx context.Context, queueID int, buildingType string, targetLevel int) error {

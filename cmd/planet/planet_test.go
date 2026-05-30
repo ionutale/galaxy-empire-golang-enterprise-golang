@@ -276,6 +276,32 @@ func (m *mockRepo) CompleteBuild(_ context.Context, queueID int, buildingType st
 	return nil
 }
 
+func (m *mockRepo) ListGalaxies(_ context.Context) ([]Galaxy, error) {
+	return []Galaxy{
+		{ID: 1, Name: "Galaxy 1"},
+		{ID: 2, Name: "Galaxy 2"},
+		{ID: 3, Name: "Galaxy 3"},
+		{ID: 4, Name: "Galaxy 4"},
+		{ID: 5, Name: "Galaxy 5"},
+		{ID: 6, Name: "Galaxy 6"},
+		{ID: 7, Name: "Galaxy 7"},
+		{ID: 8, Name: "Galaxy 8"},
+		{ID: 9, Name: "Galaxy 9"},
+	}, nil
+}
+
+func (m *mockRepo) ListSystems(_ context.Context, galaxyID int, page, pageSize int) ([]System, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockRepo) GetSystemPositions(_ context.Context, systemID int) ([]Position, error) {
+	positions := make([]Position, 15)
+	for i := 0; i < 15; i++ {
+		positions[i] = Position{PositionNum: i + 1, State: "empty"}
+	}
+	return positions, nil
+}
+
 func TestGetTechLevel_NonExistent(t *testing.T) {
 	mock := newMockRepo()
 	level, err := mock.GetTechLevel(context.Background(), 1, "weapons_tech")
