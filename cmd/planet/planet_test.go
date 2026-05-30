@@ -314,6 +314,10 @@ func (m *mockRepo) AddPlayerShips(_ context.Context, planetID, planetUserID int,
 	return nil
 }
 
+func (m *mockRepo) DeductPlayerShips(ctx context.Context, planetID int, ships map[string]int) error {
+	return nil
+}
+
 func TestGetTechLevel_NonExistent(t *testing.T) {
 	mock := newMockRepo()
 	level, err := mock.GetTechLevel(context.Background(), 1, "weapons_tech")

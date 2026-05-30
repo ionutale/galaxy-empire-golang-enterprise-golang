@@ -360,6 +360,25 @@ func (h *Handler) BuildShips(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) InternalDeductShips(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PlanetID int            `json:"planet_id"`
+		Ships    map[string]int `json:"ships"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	if err := h.service.repo.DeductPlayerShips(r.Context(), req.PlanetID, req.Ships); err != nil {
+		slog.Error("deduct ships failed", "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

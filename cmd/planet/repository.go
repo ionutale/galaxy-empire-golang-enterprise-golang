@@ -38,6 +38,7 @@ type Repository interface {
 	GetSystemPositions(ctx context.Context, systemID int) ([]Position, error)
 	GetPlayerShips(ctx context.Context, planetID int) (map[string]int, error)
 	AddPlayerShips(ctx context.Context, planetID, planetUserID int, shipType string, quantity int) error
+	DeductPlayerShips(ctx context.Context, planetID int, ships map[string]int) error
 }
 
 type PostgresRepository struct {
@@ -535,6 +536,23 @@ func (r *PostgresRepository) AddPlayerShips(ctx context.Context, planetID, plane
 		ON CONFLICT (planet_id, ship_type) DO UPDATE SET quantity = planet.player_ships.quantity + $3
 	`, planetID, shipType, quantity); err != nil {
 		return fmt.Errorf("add player ships: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) DeductPlayerShips(ctx context.Context, planetID int, ships map[string]int) error {
+	for shipType, qty := range ships {
+		tag, err := r.pool.Exec(ctx, `
+			UPDATE planet.player_ships
+			SET quantity = quantity - $1
+			WHERE planet_id = $2 AND ship_type = $3 AND quantity >= $1
+		`, qty, planetID, shipType)
+		if err != nil {
+			return fmt.Errorf("deduct ship %s: %w", shipType, err)
+		}
+		if tag.RowsAffected() == 0 {
+			return fmt.Errorf("insufficient %s ships", shipType)
+		}
 	}
 	return nil
 }

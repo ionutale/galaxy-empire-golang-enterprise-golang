@@ -48,6 +48,7 @@ func main() {
 		w.Write([]byte(`{"status":"ok","service":"planet"}`))
 	})
 
+	r.Post("/internal/ships/deduct", h.InternalDeductShips)
 	r.Get("/api/planet/mine", h.GetMyPlanet)
 	r.Post("/api/buildings/{type}/upgrade", h.StartUpgrade)
 	r.Post("/api/buildings/{type}/cancel", h.CancelUpgrade)
