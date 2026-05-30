@@ -168,6 +168,76 @@
       await loadPlanet()
     } catch (e) { error = e.message }
   }
+
+  let galaxyView = null
+  let galaxyPage = 1
+  let galaxyData = null
+  let positions = null
+
+  async function loadGalaxies() {
+    try {
+      const res = await fetch('/api/galaxy', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!res.ok) throw new Error('Failed to load galaxies')
+      galaxyView = await res.json()
+    } catch (e) { error = e.message }
+  }
+
+  async function loadSystems(galaxyID, page) {
+    try {
+      const res = await fetch(`/api/galaxy/systems/${galaxyID}?page=${page}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!res.ok) throw new Error('Failed to load systems')
+      return await res.json()
+    } catch (e) { error = e.message; return null }
+  }
+
+  async function loadPositions(systemID) {
+    try {
+      const res = await fetch(`/api/galaxy/positions/${systemID}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!res.ok) throw new Error('Failed to load positions')
+      positions = await res.json()
+    } catch (e) { error = e.message }
+  }
+
+  async function showGalaxyTab() {
+    positions = null
+    galaxyData = null
+    galaxyPage = 1
+    await loadGalaxies()
+    if (galaxyView && galaxyView.length > 0) {
+      galaxyData = await loadSystems(galaxyView[0].id, galaxyPage)
+    }
+  }
+
+  async function selectGalaxy(id) {
+    galaxyPage = 1
+    galaxyData = await loadSystems(id, galaxyPage)
+  }
+
+  async function galaxyPageNext() {
+    if (galaxyData && galaxyPage < galaxyData.total_pages) {
+      galaxyPage++
+      galaxyData = await loadSystems(selectedGalaxy, galaxyPage)
+    }
+  }
+
+  async function galaxyPagePrev() {
+    if (galaxyPage > 1) {
+      galaxyPage--
+      galaxyData = await loadSystems(selectedGalaxy, galaxyPage)
+    }
+  }
+
+  async function selectSystem(systemID) {
+    await loadPositions(systemID)
+  }
+
+  let selectedGalaxy = 1
 </script>
 
 <div class="app">
@@ -191,6 +261,8 @@
           <span class="vip-badge">VIP {planet.vip_level}</span>
           <span class="rank-badge">Rank {planet.rank}</span>
         </div>
+
+        <button class="galaxy-toggle" on:click={showGalaxyTab}>Galaxy</button>
 
         <div class="resources">
           <div class="res metal">
@@ -290,6 +362,49 @@
             </div>
           {/each}
         </div>
+
+        {#if positions}
+          <div class="galaxy-section">
+            <button class="back-btn" on:click={() => { positions = null; galaxyData = null }}>← Back to Systems</button>
+            <div class="position-grid">
+              {#each positions.positions as pos}
+                <div class="position-card" class:occupied={pos.state === 'occupied'}>
+                  <span class="pos-num">#{pos.position}</span>
+                  {#if pos.state === 'occupied'}
+                    <span class="pos-name">{pos.planet_name}</span>
+                    <span class="pos-player">Player {pos.player_id}</span>
+                  {:else}
+                    <span class="pos-empty">Empty</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {:else if galaxyData}
+          <div class="galaxy-section">
+            <h3>Galaxy Map</h3>
+            <div class="galaxy-controls">
+              <select bind:value={selectedGalaxy} on:change={(e) => selectGalaxy(parseInt(e.target.value))}>
+                {#each galaxyView || [] as g}
+                  <option value={g.id}>{g.name}</option>
+                {/each}
+              </select>
+            </div>
+            <div class="system-list">
+              {#each galaxyData.systems as sys}
+                <button class="system-row" on:click={() => selectSystem(sys.id)}>
+                  <span class="sys-num">System {sys.system_num}</span>
+                  <span class="sys-occ">{sys.occupied_count}/15 occupied</span>
+                </button>
+              {/each}
+            </div>
+            <div class="pagination">
+              <button disabled={galaxyPage <= 1} on:click={galaxyPagePrev}>Prev</button>
+              <span>Page {galaxyPage} of {galaxyData.total_pages}</span>
+              <button disabled={galaxyPage >= galaxyData.total_pages} on:click={galaxyPageNext}>Next</button>
+            </div>
+          </div>
+        {/if}
       {:else if error}
         <p class="error">{error}</p>
       {:else}
@@ -485,4 +600,51 @@
     color: #d47474; font-size: 1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
   }
   .btn-deconstruct:hover { background: #5a3a3a; }
+
+  .galaxy-toggle {
+    display: block; margin: 1rem auto; padding: 0.5rem 1rem;
+    background: #1a2a4a; border: 1px solid #2a4a6a; border-radius: 6px;
+    color: #8ab5d4; font-size: 0.85rem; cursor: pointer;
+  }
+  .galaxy-toggle:hover { background: #2a3a5a; }
+
+  .galaxy-section { margin-top: 1.5rem; text-align: left; }
+  .galaxy-section h3 { font-size: 0.9rem; color: #8a9ab5; margin-bottom: 0.75rem; text-align: center; }
+  .back-btn {
+    padding: 0.3rem 0.6rem; background: #1a2a3a; border: 1px solid #2a4a4a;
+    border-radius: 4px; color: #74a8c8; font-size: 0.75rem; cursor: pointer; margin-bottom: 0.5rem;
+  }
+  .galaxy-controls { text-align: center; margin-bottom: 0.75rem; }
+  .galaxy-controls select {
+    padding: 0.4rem 0.6rem; background: #1a2340; border: 1px solid #243050;
+    border-radius: 4px; color: #c8d6e5; font-size: 0.85rem;
+  }
+  .system-list { display: flex; flex-direction: column; gap: 0.35rem; }
+  .system-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.5rem 0.75rem; background: #1a2340; border: 1px solid #243050;
+    border-radius: 6px; color: #c8d6e5; cursor: pointer; font-size: 0.85rem;
+  }
+  .system-row:hover { background: #1e2a4a; }
+  .sys-occ { font-size: 0.75rem; color: #5a7a9a; }
+  .pagination {
+    display: flex; justify-content: center; align-items: center; gap: 0.75rem;
+    margin-top: 0.75rem;
+  }
+  .pagination button {
+    padding: 0.3rem 0.6rem; background: #1a2a4a; border: 1px solid #2a4a6a;
+    border-radius: 4px; color: #8ab5d4; cursor: pointer; font-size: 0.75rem;
+  }
+  .pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .pagination span { font-size: 0.75rem; color: #5a7a9a; }
+  .position-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+  .position-card {
+    padding: 0.5rem; background: #1a2340; border: 1px solid #243050;
+    border-radius: 6px; text-align: center; font-size: 0.8rem;
+  }
+  .position-card.occupied { border-color: #3a6a4a; background: #1a2a1a; }
+  .pos-num { display: block; font-weight: 600; color: #5a7a9a; font-size: 0.75rem; margin-bottom: 0.25rem; }
+  .pos-name { display: block; color: #8ac88a; }
+  .pos-player { display: block; font-size: 0.65rem; color: #5a7a9a; }
+  .pos-empty { color: #5a5a6a; font-style: italic; }
 </style>
