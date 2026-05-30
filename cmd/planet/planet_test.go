@@ -240,6 +240,17 @@ func (m *mockRepo) CompleteBuild(_ context.Context, queueID int, buildingType st
 	return nil
 }
 
+func TestGetTechLevel_NonExistent(t *testing.T) {
+	mock := newMockRepo()
+	level, err := mock.GetTechLevel(context.Background(), 1, "weapons_tech")
+	if err != nil {
+		t.Fatal("expected no error, got:", err)
+	}
+	if level != 0 {
+		t.Errorf("expected 0 for non-existent tech, got %d", level)
+	}
+}
+
 func TestGetTechLevel_Default(t *testing.T) {
 	mock := newMockRepo()
 	level, err := mock.GetTechLevel(context.Background(), 1, "energy_tech")

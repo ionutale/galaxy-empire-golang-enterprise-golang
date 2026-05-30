@@ -118,6 +118,14 @@ func (r *PostgresRepository) Create(ctx context.Context, userID int) (Planet, []
 		buildings = append(buildings, b)
 	}
 
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO planet.player_technologies (user_id, type, level)
+		VALUES ($1, 'energy_tech', 3)
+		ON CONFLICT (user_id, type) DO NOTHING
+	`, userID); err != nil {
+		return Planet{}, nil, fmt.Errorf("insert default tech: %w", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return Planet{}, nil, fmt.Errorf("commit: %w", err)
 	}
@@ -346,7 +354,7 @@ func (r *PostgresRepository) GetTechLevel(ctx context.Context, userID int, techT
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, nil
 		}
-		return 0, err
+		return 0, fmt.Errorf("get tech level: %w", err)
 	}
 	return level, nil
 }
