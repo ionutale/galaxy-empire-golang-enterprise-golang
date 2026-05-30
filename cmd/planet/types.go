@@ -93,3 +93,23 @@ type Position struct {
 	PlanetName  string `json:"planet_name,omitempty"`
 	PlayerID    int    `json:"player_id,omitempty"`
 }
+
+type ShipResponse struct {
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Metal    int    `json:"metal"`
+	Crystal  int    `json:"crystal"`
+	Gas      int    `json:"gas"`
+	Speed    int    `json:"speed"`
+	Cargo    int    `json:"cargo"`
+	Fuel     int    `json:"fuel"`
+	Strength int    `json:"strength"`
+	Shield   int    `json:"shield"`
+	Attack   int    `json:"attack"`
+	Quantity int    `json:"quantity"`
+}
+
+type BuildRequest struct {
+	ShipType string `json:"ship_type"`
+	Quantity int    `json:"quantity"`
+}
