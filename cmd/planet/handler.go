@@ -64,7 +64,7 @@ func (h *Handler) GetMyPlanet(w http.ResponseWriter, r *http.Request) {
 	prod := h.service.calculateProduction(buildings, efficiency, planet.Type, planet.Temperature, energyTechLevel, vipBonus, rankBonus)
 	storage := h.service.calculateStorage(buildings)
 	planet.Energy = netEnergy
-	resp := toPlanetResponse(planet, buildings, prod, storage, queue)
+	resp := toPlanetResponse(planet, buildings, prod, storage, queue, vipPoints, totalResources)
 	writeJSON(w, http.StatusOK, resp)
 }
 

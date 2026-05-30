@@ -187,6 +187,11 @@
         </p>
         <p class="fields">Fields: {planet.fields_used}/{planet.max_fields}</p>
 
+        <div class="player-stats">
+          <span class="vip-badge">VIP {planet.vip_level}</span>
+          <span class="rank-badge">Rank {planet.rank}</span>
+        </div>
+
         <div class="resources">
           <div class="res metal">
             <span class="label">Metal</span>
@@ -370,6 +375,19 @@
   .type-gas_giant { background: #1a0a2a; border-color: #3a1a5a; color: #a874d4; }
   .temperature { font-family: monospace; color: #5a7a9a; font-size: 0.8rem; }
   .fields { font-size: 0.75rem; color: #6a8a6a; margin-bottom: 1.5rem; }
+
+  .player-stats {
+    display: flex; justify-content: center; align-items: center;
+    gap: 0.75rem; margin-bottom: 1.5rem; font-size: 0.85rem;
+  }
+  .vip-badge {
+    padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem;
+    background: #2a1a4a; border: 1px solid #4a2a6a; color: #b074d4;
+  }
+  .rank-badge {
+    padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem;
+    background: #1a3a2a; border: 1px solid #2a5a3a; color: #74d4a8;
+  }
 
   .resources { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
   .res {

@@ -536,7 +536,7 @@ func rankProductionBonus(rank int) float64 {
 	return bonuses[rank]
 }
 
-func toPlanetResponse(p Planet, buildings []Building, prod Production, storage Storage, queue []QueueEntry) PlanetResponse {
+func toPlanetResponse(p Planet, buildings []Building, prod Production, storage Storage, queue []QueueEntry, vipPoints int, totalResources int) PlanetResponse {
 	return PlanetResponse{
 		ID: p.ID, UserID: p.UserID, Name: p.Name,
 		Metal: p.Metal, Crystal: p.Crystal, Gas: p.Gas,
@@ -545,5 +545,7 @@ func toPlanetResponse(p Planet, buildings []Building, prod Production, storage S
 		MaxFields: p.MaxFields, FieldsUsed: len(buildings),
 		Type: p.Type, Temperature: p.Temperature,
 		Buildings: buildings, Production: prod, Storage: storage, Queue: queue,
+		VIPLevel: vipLevelFromPoints(vipPoints),
+		Rank:     rankFromResources(totalResources),
 	}
 }

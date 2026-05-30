@@ -68,6 +68,8 @@ type PlanetResponse struct {
 	FieldsUsed  int          `json:"fields_used"`
 	Type        string       `json:"type"`
 	Temperature int          `json:"temperature"`
+	VIPLevel    int          `json:"vip_level"`
+	Rank        int          `json:"rank"`
 	Buildings   []Building   `json:"buildings"`
 	Production Production   `json:"production"`
 	Storage    Storage      `json:"storage"`
