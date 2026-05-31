@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -62,6 +63,16 @@ func (s *FleetService) DispatchFleet(ctx context.Context, playerID int, req Disp
 
 	if err := s.deductShips(ctx, req.OriginPlanetID, req.Ships); err != nil {
 		return Fleet{}, err
+	}
+
+	driveTechs, err := s.getPlayerTechLevels(ctx, playerID)
+	if err != nil {
+		slog.Warn("failed to fetch drive techs", "error", err)
+		driveTechs = map[string]int{}
+	}
+
+	if eff := effectiveMinSpeed(req.Ships, driveTechs); eff > 0 {
+		minSpd = eff
 	}
 
 	dist := distance(originCoords.galaxy, originCoords.system, originCoords.position, req.TargetGalaxy, req.TargetSystem, req.TargetPosition)
@@ -130,6 +141,26 @@ func (s *FleetService) getPlanetCoords(ctx context.Context, planetID int) (plane
 		return planetCoords{}, fmt.Errorf("parse coords: %w", err)
 	}
 	return planetCoords{coords.Galaxy, coords.System, coords.Position}, nil
+}
+
+func (s *FleetService) getPlayerTechLevels(ctx context.Context, playerID int) (map[string]int, error) {
+	body, _ := json.Marshal(map[string]int{"player_id": playerID})
+	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/player/techs", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("planet service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("planet service: %s", string(respBody))
+	}
+	var result struct {
+		Technologies map[string]int `json:"technologies"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("parse techs: %w", err)
+	}
+	return result.Technologies, nil
 }
 
 func (s *FleetService) deductShips(ctx context.Context, planetID int, ships map[string]int) error {

@@ -222,3 +222,23 @@ func TestAbs(t *testing.T) {
 		t.Errorf("abs(0) should be 0, got %d", abs(0))
 	}
 }
+
+func TestEffectiveMinSpeed(t *testing.T) {
+	// No techs = base speed
+	spd := effectiveMinSpeed(map[string]int{"cargo": 1}, map[string]int{})
+	if spd != 7500 {
+		t.Errorf("expected base speed 7500, got %d", spd)
+	}
+	// With combustion drive level 10
+	spd = effectiveMinSpeed(map[string]int{"cargo": 1}, map[string]int{"combustion_drive": 10})
+	expected := int(7500 * (1 + 10*0.3))
+	if spd != expected {
+		t.Errorf("expected boosted speed %d, got %d", expected, spd)
+	}
+	// Hyperspace on battleship
+	spd = effectiveMinSpeed(map[string]int{"battleship": 1}, map[string]int{"hyperspace_drive": 5})
+	expected = int(10000 * (1 + 5*0.3))
+	if spd != expected {
+		t.Errorf("expected boosted speed %d, got %d", expected, spd)
+	}
+}
