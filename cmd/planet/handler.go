@@ -454,6 +454,31 @@ func (h *Handler) InternalDeductResource(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (h *Handler) InternalGetPlayerTechs(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PlayerID int `json:"player_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	techTypes := []string{"combustion_drive", "impulse_drive", "hyperspace_drive"}
+	techs := make(map[string]int)
+	for _, t := range techTypes {
+		level, err := h.service.repo.GetTechLevel(r.Context(), req.PlayerID, t)
+		if err != nil {
+			slog.Error("get tech level", "tech", t, "error", err)
+			continue
+		}
+		techs[t] = level
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"technologies": techs,
+	})
+}
+
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
