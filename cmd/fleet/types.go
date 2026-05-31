@@ -1,5 +1,7 @@
 package main
 
+import "time"
+
 type Fleet struct {
 	ID              int
 	PlayerID        int
@@ -11,6 +13,7 @@ type Fleet struct {
 	Status          string
 	SpeedPct        int
 	Ships           map[string]int
+	ArrivesAt       time.Time
 }
 
 type FleetResponse struct {
@@ -24,6 +27,7 @@ type FleetResponse struct {
 	Status          string         `json:"status"`
 	SpeedPct        int            `json:"speed_pct"`
 	Ships           map[string]int `json:"ships"`
+	ArrivesAt       *time.Time     `json:"arrives_at,omitempty"`
 }
 
 type DispatchRequest struct {
