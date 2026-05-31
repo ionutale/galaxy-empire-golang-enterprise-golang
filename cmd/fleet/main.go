@@ -62,6 +62,37 @@ func main() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		slog.Info("travel worker started")
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				fleets, err := repo.GetArrivedFleets(ctx)
+				cancel()
+				if err != nil {
+					slog.Error("travel worker: get arrived fleets", "error", err)
+					continue
+				}
+				for _, f := range fleets {
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					if err := repo.MarkFleetArrived(ctx, f.ID); err != nil {
+						slog.Error("travel worker: mark arrived", "fleet", f.ID, "error", err)
+					} else {
+						slog.Info("fleet arrived", "fleet", f.ID, "mission", f.Mission)
+					}
+					cancel()
+				}
+			case <-quit:
+				slog.Info("travel worker stopped")
+				return
+			}
+		}
+	}()
+
 	<-quit
 
 	slog.Info("fleet service shutting down")
