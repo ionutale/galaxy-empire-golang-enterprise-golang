@@ -103,8 +103,8 @@ func TestDispatchFleet_Success(t *testing.T) {
 	if fleet.Mission != "transport" {
 		t.Fatalf("expected transport, got %s", fleet.Mission)
 	}
-	if fleet.Status != "stationed" {
-		t.Fatalf("expected stationed, got %s", fleet.Status)
+	if fleet.Status != "in_transit" {
+		t.Fatalf("expected in_transit, got %s", fleet.Status)
 	}
 	if fleet.Ships["cargo"] != 5 {
 		t.Fatalf("expected 5 cargo, got %d", fleet.Ships["cargo"])
