@@ -156,3 +156,69 @@ func TestDispatch_NoAuth(t *testing.T) {
 		t.Fatalf("expected 401, got %d", w.Code)
 	}
 }
+
+func TestDistance(t *testing.T) {
+	d := distance(1, 1, 1, 1, 1, 2)
+	if d != 1 {
+		t.Errorf("same coords distance should be 1, got %d", d)
+	}
+	d = distance(1, 1, 1, 3, 1, 1)
+	if d != 40000 {
+		t.Errorf("expected 40000, got %d", d)
+	}
+}
+
+func TestMinShipSpeed(t *testing.T) {
+	spd, onlyBomber := minShipSpeed(map[string]int{"cargo": 1, "light_fighter": 1})
+	if onlyBomber {
+		t.Error("should not be only bomber")
+	}
+	if spd != 7500 {
+		t.Errorf("expected 7500 (min of cargo 7500 and lf 12500), got %d", spd)
+	}
+}
+
+func TestMinShipSpeed_BomberAlone(t *testing.T) {
+	_, onlyBomber := minShipSpeed(map[string]int{"bomber": 1})
+	if !onlyBomber {
+		t.Error("should be only bomber")
+	}
+}
+
+func TestDispatchFleet_BomberAlone(t *testing.T) {
+	svc := NewFleetService(newMockRepo(), "http://localhost:8082")
+	_, err := svc.DispatchFleet(context.Background(), 1, DispatchRequest{
+		OriginPlanetID: 1,
+		Ships:          map[string]int{"bomber": 1},
+		TargetGalaxy:   1, TargetSystem: 1, TargetPosition: 1,
+		Mission: "transport", SpeedPct: 100,
+	})
+	if err == nil || !strings.Contains(err.Error(), "bomber") {
+		t.Fatalf("expected bomber alone error, got: %v", err)
+	}
+}
+
+func TestDispatchFleet_UnknownShip(t *testing.T) {
+	svc := NewFleetService(newMockRepo(), "http://localhost:8082")
+	_, err := svc.DispatchFleet(context.Background(), 1, DispatchRequest{
+		OriginPlanetID: 1,
+		Ships:          map[string]int{"death_star": 1},
+		TargetGalaxy:   1, TargetSystem: 1, TargetPosition: 1,
+		Mission: "transport", SpeedPct: 100,
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown ship") {
+		t.Fatalf("expected unknown ship error, got: %v", err)
+	}
+}
+
+func TestAbs(t *testing.T) {
+	if abs(5) != 5 {
+		t.Errorf("abs(5) should be 5, got %d", abs(5))
+	}
+	if abs(-5) != 5 {
+		t.Errorf("abs(-5) should be 5, got %d", abs(-5))
+	}
+	if abs(0) != 0 {
+		t.Errorf("abs(0) should be 0, got %d", abs(0))
+	}
+}
