@@ -303,6 +303,30 @@
     return `${h}h ${m}m`
   }
 
+  function formatFleetETA(arrivesAt) {
+    const eta = new Date(arrivesAt)
+    const now = new Date()
+    const diff = eta - now
+    if (diff <= 0) return 'Now'
+    const h = Math.floor(diff / 3600000)
+    const m = Math.floor((diff % 3600000) / 60000)
+    const s = Math.floor((diff % 60000) / 1000)
+    if (h > 0) return `${h}h ${m}m`
+    if (m > 0) return `${m}m ${s}s`
+    return `${s}s`
+  }
+
+  function estimateFuelCost() {
+    let total = 0
+    Object.entries(dispatchForm.shipQuantities || {}).forEach(([type, qty]) => {
+      if (qty > 0 && fleetShips) {
+        const ship = fleetShips.ships.find(s => s.type === type)
+        if (ship) total += qty * (ship.fuel || 0)
+      }
+    })
+    return total.toLocaleString()
+  }
+
   let fleetData = null
   let fleetShips = null
 
@@ -597,7 +621,13 @@
                     {/each}
                   </div>
                   {#if fleet.arrives_at}
-                    <div class="fleet-arrival">Arrives: {new Date(fleet.arrives_at).toLocaleString()}</div>
+                    <div class="fleet-arrival">
+                      {#if fleet.status === 'in_transit'}
+                        Arrives {formatFleetETA(fleet.arrives_at)}
+                      {:else}
+                        Arrived: {new Date(fleet.arrives_at).toLocaleString()}
+                      {/if}
+                    </div>
                   {/if}
                 </div>
               {/each}
@@ -641,6 +671,10 @@
                   <input type="range" min="10" max="100" step="10" bind:value={dispatchForm.speed} />
                   <span class="speed-val">{dispatchForm.speed}%</span>
                 </div>
+              </div>
+              <div class="form-row">
+                <label>Est. Fuel</label>
+                <span class="fuel-estimate">~{estimateFuelCost()} gas</span>
               </div>
               {#if fleetShips}
                 <div class="form-ships">
@@ -971,6 +1005,7 @@
     border-radius: 3px; color: #8ab5d4;
   }
   .fleet-arrival { font-size: 0.7rem; color: #5aaa5a; }
+  .fuel-estimate { font-size: 0.75rem; color: #74d4a8; font-family: monospace; }
   .fleet-empty { font-size: 0.8rem; color: #5a5a6a; text-align: center; padding: 1rem; }
   .dispatch-form { display: flex; flex-direction: column; gap: 0.5rem; }
   .form-row { display: flex; align-items: center; gap: 0.5rem; }
