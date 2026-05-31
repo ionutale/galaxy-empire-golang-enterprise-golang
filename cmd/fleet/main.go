@@ -93,6 +93,11 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			ships JSONB NOT NULL DEFAULT '{}',
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);
+	`	); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `
+		ALTER TABLE fleet.fleets ADD COLUMN IF NOT EXISTS arrives_at TIMESTAMPTZ;
 	`); err != nil {
 		return err
 	}
