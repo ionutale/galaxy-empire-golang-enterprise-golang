@@ -100,6 +100,10 @@ func (s *FleetService) DispatchFleet(ctx context.Context, playerID int, req Disp
 		return Fleet{}, fmt.Errorf("fuel deduction: %w", err)
 	}
 
+	if err := s.CheckFleetSlotLimit(ctx, playerID); err != nil {
+		return Fleet{}, err
+	}
+
 	now := time.Now()
 	fleet := Fleet{
 		PlayerID:       playerID,
@@ -115,6 +119,148 @@ func (s *FleetService) DispatchFleet(ctx context.Context, playerID int, req Disp
 	}
 
 	return s.repo.CreateFleet(ctx, fleet)
+}
+
+func (s *FleetService) RecallFleet(ctx context.Context, playerID, fleetID int) (Fleet, error) {
+	fleet, err := s.repo.GetFleetByID(ctx, fleetID)
+	if err != nil {
+		return Fleet{}, fmt.Errorf("fleet not found")
+	}
+	if fleet.PlayerID != playerID {
+		return Fleet{}, fmt.Errorf("not your fleet")
+	}
+	if fleet.Status != "in_transit" && fleet.Status != "stationed" {
+		return Fleet{}, fmt.Errorf("fleet cannot be recalled")
+	}
+
+	now := time.Now()
+	remaining := fleet.ArrivesAt.Sub(now)
+	if remaining < 0 {
+		remaining = 0
+	}
+	returnTime := remaining * 2
+	if returnTime < 10*time.Second {
+		returnTime = 10 * time.Second
+	}
+	fleet.ArrivesAt = now.Add(returnTime)
+
+	if err := s.repo.SetFleetReturning(ctx, fleetID, fleet.ArrivesAt); err != nil {
+		return Fleet{}, err
+	}
+	fleet.Status = "returning"
+	return fleet, nil
+}
+
+func (s *FleetService) SplitFleet(ctx context.Context, playerID, fleetID int, ships map[string]int) (Fleet, error) {
+	fleet, err := s.repo.GetFleetByID(ctx, fleetID)
+	if err != nil {
+		return Fleet{}, fmt.Errorf("fleet not found")
+	}
+	if fleet.PlayerID != playerID {
+		return Fleet{}, fmt.Errorf("not your fleet")
+	}
+	if fleet.Status != "stationed" {
+		return Fleet{}, fmt.Errorf("only stationed fleets can be split")
+	}
+	if len(ships) == 0 {
+		return Fleet{}, fmt.Errorf("no ships selected")
+	}
+
+	for shipType, qty := range ships {
+		if qty <= 0 {
+			continue
+		}
+		if fleet.Ships[shipType] < qty {
+			return Fleet{}, fmt.Errorf("not enough %s ships", shipType)
+		}
+		fleet.Ships[shipType] -= qty
+		if fleet.Ships[shipType] == 0 {
+			delete(fleet.Ships, shipType)
+		}
+	}
+
+	if err := s.repo.UpdateFleetShips(ctx, fleetID, fleet.Ships); err != nil {
+		return Fleet{}, err
+	}
+
+	newFleet := Fleet{
+		PlayerID:       playerID,
+		OriginPlanetID: fleet.OriginPlanetID,
+		TargetGalaxy:   fleet.TargetGalaxy,
+		TargetSystem:   fleet.TargetSystem,
+		TargetPosition: fleet.TargetPosition,
+		Mission:        fleet.Mission,
+		Status:         "stationed",
+		SpeedPct:       fleet.SpeedPct,
+		Ships:          ships,
+	}
+
+	return s.repo.CreateFleet(ctx, newFleet)
+}
+
+func (s *FleetService) MergeFleets(ctx context.Context, playerID int, fleetIDs []int) (Fleet, error) {
+	if len(fleetIDs) < 2 {
+		return Fleet{}, fmt.Errorf("need at least 2 fleets to merge")
+	}
+
+	var targetFleet Fleet
+	mergedShips := make(map[string]int)
+
+	for i, fid := range fleetIDs {
+		fleet, err := s.repo.GetFleetByID(ctx, fid)
+		if err != nil {
+			return Fleet{}, fmt.Errorf("fleet %d not found", fid)
+		}
+		if fleet.PlayerID != playerID {
+			return Fleet{}, fmt.Errorf("fleet %d is not yours", fid)
+		}
+		if fleet.Status != "stationed" {
+			return Fleet{}, fmt.Errorf("fleet %d must be stationed", fid)
+		}
+
+		if i == 0 {
+			targetFleet = fleet
+		} else {
+			if fleet.TargetGalaxy != targetFleet.TargetGalaxy ||
+				fleet.TargetSystem != targetFleet.TargetSystem ||
+				fleet.TargetPosition != targetFleet.TargetPosition {
+				return Fleet{}, fmt.Errorf("fleets must be at the same coordinates")
+			}
+		}
+
+		for shipType, qty := range fleet.Ships {
+			mergedShips[shipType] += qty
+		}
+
+		if i > 0 {
+			if err := s.repo.DeleteFleet(ctx, fid); err != nil {
+				return Fleet{}, err
+			}
+		}
+	}
+
+	if err := s.repo.UpdateFleetShips(ctx, targetFleet.ID, mergedShips); err != nil {
+		return Fleet{}, err
+	}
+	targetFleet.Ships = mergedShips
+	return targetFleet, nil
+}
+
+func (s *FleetService) CheckFleetSlotLimit(ctx context.Context, playerID int) error {
+	count, err := s.repo.CountPlayerFleets(ctx, playerID)
+	if err != nil {
+		return err
+	}
+	techs, err := s.getPlayerTechLevels(ctx, playerID)
+	if err != nil {
+		techs = map[string]int{}
+	}
+	computerLevel := techs["computer_tech"]
+	limit := 1 + computerLevel*2
+	if count >= limit {
+		return fmt.Errorf("fleet slot limit reached (%d/%d)", count, limit)
+	}
+	return nil
 }
 
 type planetCoords struct {

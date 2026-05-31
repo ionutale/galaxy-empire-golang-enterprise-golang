@@ -79,7 +79,7 @@ func (r *PostgresRepository) ListPlayerFleets(ctx context.Context, playerID int)
 
 func (r *PostgresRepository) MarkFleetArrived(ctx context.Context, fleetID int) error {
 	_, err := r.pool.Exec(ctx,
-		`UPDATE fleet.fleets SET status = 'arrived' WHERE id = $1 AND status = 'in_transit'`,
+		`UPDATE fleet.fleets SET status = 'arrived' WHERE id = $1 AND status IN ('in_transit', 'returning')`,
 		fleetID,
 	)
 	if err != nil {
@@ -132,7 +132,7 @@ func (r *PostgresRepository) GetArrivedFleets(ctx context.Context) ([]Fleet, err
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at
 		FROM fleet.fleets
-		WHERE status = 'in_transit' AND arrives_at <= NOW()
+		WHERE (status = 'in_transit' OR status = 'returning') AND arrives_at <= NOW()
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("get arrived fleets: %w", err)
@@ -245,7 +245,7 @@ func (m *mockRepo) SetFleetReturning(ctx context.Context, fleetID int, arrivesAt
 func (m *mockRepo) GetArrivedFleets(ctx context.Context) ([]Fleet, error) {
 	var result []Fleet
 	for _, f := range m.fleets {
-		if f.Status == "in_transit" && !f.ArrivesAt.IsZero() && time.Now().After(f.ArrivesAt) {
+		if (f.Status == "in_transit" || f.Status == "returning") && !f.ArrivesAt.IsZero() && time.Now().After(f.ArrivesAt) {
 			result = append(result, f)
 		}
 	}
