@@ -385,6 +385,50 @@
       await loadPlanet()
     } catch (e) { error = e.message }
   }
+
+  async function recallFleet(fleetId) {
+    try {
+      const res = await fetch(`/api/fleet/${fleetId}/recall`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        error = data.error || 'Recall failed'
+        return
+      }
+      await loadFleet()
+    } catch (e) { error = e.message }
+  }
+
+  let splitTarget = null
+  let mergeIds = []
+
+  function toggleMerge(fleetId) {
+    if (mergeIds.includes(fleetId)) {
+      mergeIds = mergeIds.filter(id => id !== fleetId)
+    } else {
+      mergeIds = [...mergeIds, fleetId]
+    }
+  }
+
+  async function doMerge() {
+    if (mergeIds.length < 2) { error = 'Select at least 2 fleets'; return }
+    try {
+      const res = await fetch('/api/fleet/merge', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fleet_ids: mergeIds })
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        error = data.error || 'Merge failed'
+        return
+      }
+      mergeIds = []
+      await loadFleet()
+    } catch (e) { error = e.message }
+  }
 </script>
 
 <div class="app">
@@ -602,6 +646,13 @@
         {#if fleetData}
           <div class="fleet-section">
             <h3>My Fleets</h3>
+            {#if mergeIds.length >= 2}
+              <div class="merge-bar">
+                <span>{mergeIds.length} fleets selected</span>
+                <button class="btn-action btn-merge-do" on:click={doMerge}>Merge</button>
+                <button class="btn-action btn-cancel" on:click={() => mergeIds = []}>Cancel</button>
+              </div>
+            {/if}
             {#if fleetData.fleets && fleetData.fleets.length > 0}
               {#each fleetData.fleets as fleet}
                 <div class="fleet-card">
@@ -629,6 +680,19 @@
                       {/if}
                     </div>
                   {/if}
+                  <div class="fleet-actions">
+                    {#if fleet.status === 'stationed'}
+                      <button class="btn-action btn-split" on:click={() => splitTarget = fleet.id}>Split</button>
+                      <button class="btn-action btn-merge-toggle"
+                        class:selected={mergeIds.includes(fleet.id)}
+                        on:click={() => toggleMerge(fleet.id)}>
+                        {mergeIds.includes(fleet.id) ? 'Selected' : 'Merge'}
+                      </button>
+                    {/if}
+                    {#if fleet.status === 'in_transit'}
+                      <button class="btn-action btn-recall" on:click={() => recallFleet(fleet.id)}>Recall</button>
+                    {/if}
+                  </div>
                 </div>
               {/each}
             {:else}
@@ -1007,6 +1071,25 @@
   .fleet-arrival { font-size: 0.7rem; color: #5aaa5a; }
   .fuel-estimate { font-size: 0.75rem; color: #74d4a8; font-family: monospace; }
   .fleet-empty { font-size: 0.8rem; color: #5a5a6a; text-align: center; padding: 1rem; }
+  .fleet-actions { display: flex; gap: 0.35rem; margin-top: 0.35rem; }
+  .btn-action {
+    padding: 0.2rem 0.5rem; border: none; border-radius: 3px;
+    font-size: 0.65rem; cursor: pointer;
+  }
+  .btn-recall { background: #5a3a2a; color: #e8b87a; }
+  .btn-recall:hover { background: #6a4a3a; }
+  .btn-split { background: #2a3a5a; color: #7ab8e8; }
+  .btn-split:hover { background: #3a4a6a; }
+  .btn-merge-toggle { background: #2a4a3a; color: #7ae8a8; }
+  .btn-merge-toggle:hover { background: #3a5a4a; }
+  .btn-merge-toggle.selected { background: #4a6a3a; }
+  .btn-merge-do { background: #4a6a3a; color: #a8e8a8; }
+  .btn-cancel { background: #5a3a3a; color: #e8a8a8; }
+  .merge-bar {
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    padding: 0.4rem; margin-bottom: 0.5rem; background: #1a2a1a; border: 1px solid #2a4a2a;
+    border-radius: 6px; font-size: 0.75rem; color: #8ab58a;
+  }
   .dispatch-form { display: flex; flex-direction: column; gap: 0.5rem; }
   .form-row { display: flex; align-items: center; gap: 0.5rem; }
   .form-row label { width: 100px; font-size: 0.75rem; color: #8a9ab5; text-align: right; flex-shrink: 0; }
