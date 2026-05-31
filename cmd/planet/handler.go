@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -377,6 +378,76 @@ func (h *Handler) InternalDeductShips(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.repo.DeductPlayerShips(r.Context(), req.PlanetID, req.Ships); err != nil {
 		slog.Error("deduct ships failed", "error", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (h *Handler) InternalGetPlanetCoords(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PlanetID int `json:"planet_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	planet, err := h.service.repo.FindByID(r.Context(), req.PlanetID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "planet not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{
+		"galaxy":   planet.Galaxy,
+		"system":   planet.System,
+		"position": planet.Position,
+	})
+}
+
+func (h *Handler) InternalDeductResource(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PlanetID int    `json:"planet_id"`
+		Resource string `json:"resource"`
+		Amount   int    `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	planet, err := h.service.repo.FindByID(r.Context(), req.PlanetID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "planet not found"})
+		return
+	}
+
+	switch req.Resource {
+	case "metal":
+		if planet.Metal < req.Amount {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "insufficient metal"})
+			return
+		}
+		planet.Metal -= req.Amount
+	case "crystal":
+		if planet.Crystal < req.Amount {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "insufficient crystal"})
+			return
+		}
+		planet.Crystal -= req.Amount
+	case "gas":
+		if planet.Gas < req.Amount {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "insufficient gas"})
+			return
+		}
+		planet.Gas -= req.Amount
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid resource"})
+		return
+	}
+
+	if err := h.service.repo.UpdateResources(r.Context(), req.PlanetID, planet.Metal, planet.Crystal, planet.Gas, time.Now()); err != nil {
+		slog.Error("update resources failed", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 

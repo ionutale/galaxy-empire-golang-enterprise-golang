@@ -49,6 +49,8 @@ func main() {
 	})
 
 	r.Post("/internal/ships/deduct", h.InternalDeductShips)
+	r.Post("/internal/planet/coords", h.InternalGetPlanetCoords)
+	r.Post("/internal/resources/deduct", h.InternalDeductResource)
 	r.Get("/api/planet/mine", h.GetMyPlanet)
 	r.Post("/api/buildings/{type}/upgrade", h.StartUpgrade)
 	r.Post("/api/buildings/{type}/cancel", h.CancelUpgrade)
