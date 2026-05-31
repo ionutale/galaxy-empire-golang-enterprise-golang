@@ -50,6 +50,9 @@ func main() {
 
 	r.Get("/api/fleet/my-fleets", h.MyFleets)
 	r.Post("/api/fleet/dispatch", h.Dispatch)
+	r.Post("/api/fleet/merge", h.MergeFleets)
+	r.Post("/api/fleet/{id}/recall", h.RecallFleet)
+	r.Post("/api/fleet/{id}/split", h.SplitFleet)
 
 	srv := &http.Server{Addr: ":8083", Handler: r}
 	go func() {

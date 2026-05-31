@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type FleetHandler struct {
@@ -62,6 +64,102 @@ func (h *FleetHandler) Dispatch(w http.ResponseWriter, r *http.Request) {
 	fleet, err := h.service.DispatchFleet(r.Context(), userID, req)
 	if err != nil {
 		slog.Error("dispatch failed", "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toFleetResponse(fleet))
+}
+
+func (h *FleetHandler) RecallFleet(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid user"})
+		return
+	}
+
+	fleetIDStr := chi.URLParam(r, "id")
+	fleetID, err := strconv.Atoi(fleetIDStr)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid fleet id"})
+		return
+	}
+
+	fleet, err := h.service.RecallFleet(r.Context(), userID, fleetID)
+	if err != nil {
+		slog.Error("recall fleet failed", "fleet", fleetID, "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toFleetResponse(fleet))
+}
+
+func (h *FleetHandler) SplitFleet(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid user"})
+		return
+	}
+
+	fleetIDStr := chi.URLParam(r, "id")
+	fleetID, err := strconv.Atoi(fleetIDStr)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid fleet id"})
+		return
+	}
+
+	var req struct {
+		Ships map[string]int `json:"ships"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	fleet, err := h.service.SplitFleet(r.Context(), userID, fleetID, req.Ships)
+	if err != nil {
+		slog.Error("split fleet failed", "fleet", fleetID, "error", err)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toFleetResponse(fleet))
+}
+
+func (h *FleetHandler) MergeFleets(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid user"})
+		return
+	}
+
+	var req struct {
+		FleetIDs []int `json:"fleet_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+
+	fleet, err := h.service.MergeFleets(r.Context(), userID, req.FleetIDs)
+	if err != nil {
+		slog.Error("merge fleets failed", "error", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
