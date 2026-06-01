@@ -1,0 +1,32 @@
+# Prevent the entire repo tree from being sent as build context for every service.
+# Each service Dockerfile is in cmd/<service>/ and only needs its own module.
+.git
+.github
+game
+docs
+scripts
+findings.md
+README.md
+go.work
+go.work.sum
+*.md
+
+# Compiled binaries
+admin
+alliance
+auth
+chat
+combat
+espionage
+event
+fleet
+friend
+gateway
+nebula
+notification
+planet
+quest
+radar
+ranking
+research
+tutorial

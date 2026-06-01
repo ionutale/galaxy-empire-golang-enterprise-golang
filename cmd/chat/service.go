@@ -48,7 +48,7 @@ type ChatService struct {
 }
 
 func NewChatService(repo Repository, allianceURL, jwtSecret string) *ChatService {
-	return &ChatService{
+	svc := &ChatService{
 		repo:        repo,
 		hub:         &SubscriberManager{},
 		rateLimits:  make(map[int]time.Time),
@@ -56,6 +56,22 @@ func NewChatService(repo Repository, allianceURL, jwtSecret string) *ChatService
 		httpClient:  &http.Client{Timeout: 10 * time.Second},
 		jwtKey:      []byte(jwtSecret),
 	}
+	// Periodically evict stale rate-limit entries to prevent unbounded map growth.
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			cutoff := time.Now().Add(-10 * time.Second)
+			svc.rateMu.Lock()
+			for id, t := range svc.rateLimits {
+				if t.Before(cutoff) {
+					delete(svc.rateLimits, id)
+				}
+			}
+			svc.rateMu.Unlock()
+		}
+	}()
+	return svc
 }
 
 func (s *ChatService) SendMessage(ctx context.Context, playerID int, channel, content string) (Message, error) {

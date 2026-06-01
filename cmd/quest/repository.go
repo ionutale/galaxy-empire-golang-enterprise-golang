@@ -94,7 +94,7 @@ func (r *PostgresRepository) UpsertPlayerQuest(ctx context.Context, pq PlayerQue
 }
 
 func (r *PostgresRepository) ClaimPlayerQuest(ctx context.Context, playerID int, questID string, claimedAt time.Time) error {
-	_, err := r.pool.Exec(ctx,
+	tag, err := r.pool.Exec(ctx,
 		`UPDATE quest.player_quests
 		 SET status = 'claimed', claimed_at = $3
 		 WHERE player_id = $1 AND quest_id = $2 AND status = 'completed'`,
@@ -102,6 +102,9 @@ func (r *PostgresRepository) ClaimPlayerQuest(ctx context.Context, playerID int,
 	)
 	if err != nil {
 		return fmt.Errorf("claim player quest: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("quest not available for claiming")
 	}
 	return nil
 }

@@ -209,6 +209,13 @@ func (s *AllianceService) GetMyAlliance(ctx context.Context, playerID int) (*All
 }
 
 func (s *AllianceService) BankDeposit(ctx context.Context, playerID, planetID int, metal, crystal, gas int) (Bank, error) {
+	if metal < 0 || crystal < 0 || gas < 0 {
+		return Bank{}, fmt.Errorf("deposit amounts cannot be negative")
+	}
+	if metal == 0 && crystal == 0 && gas == 0 {
+		return Bank{}, fmt.Errorf("deposit amounts cannot all be zero")
+	}
+
 	member, err := s.repo.GetMember(ctx, playerID)
 	if err != nil {
 		return Bank{}, fmt.Errorf("check membership: %w", err)

@@ -104,12 +104,18 @@ func (s *AdminService) GrantDM(ctx context.Context, playerID, amount int, reason
 	if reason == "" {
 		return fmt.Errorf("reason is required")
 	}
+	if amount <= 0 || amount > 1_000_000 {
+		return fmt.Errorf("amount must be between 1 and 1000000")
+	}
 	return s.repo.AddDM(ctx, playerID, amount)
 }
 
 func (s *AdminService) GrantCredits(ctx context.Context, playerID, amount int, reason string) error {
 	if reason == "" {
 		return fmt.Errorf("reason is required")
+	}
+	if amount <= 0 || amount > 10_000_000 {
+		return fmt.Errorf("amount must be between 1 and 10000000")
 	}
 	return s.repo.AddCredits(ctx, playerID, amount)
 }

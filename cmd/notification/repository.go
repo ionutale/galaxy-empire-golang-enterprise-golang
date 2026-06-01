@@ -39,6 +39,9 @@ func (r *PostgresRepository) CreateNotification(ctx context.Context, playerID in
 }
 
 func (r *PostgresRepository) ListNotifications(ctx context.Context, playerID int, unreadOnly bool, limit, offset int) ([]Notification, int, error) {
+	if limit > 100 {
+		limit = 100
+	}
 	var total int
 	countQuery := "SELECT COUNT(*) FROM notification.notifications WHERE player_id = $1"
 	countArgs := []any{playerID}

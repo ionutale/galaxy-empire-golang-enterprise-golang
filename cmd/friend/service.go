@@ -56,6 +56,10 @@ func (s *FriendService) AcceptRequest(ctx context.Context, playerID, friendID in
 	if existing.Status != "pending" {
 		return fmt.Errorf("friendship is not pending")
 	}
+	// Only the recipient can accept — the initiator cannot accept their own outgoing request.
+	if existing.PlayerID == playerID {
+		return fmt.Errorf("cannot accept your own friend request")
+	}
 
 	if err := s.repo.AcceptFriend(ctx, playerID, friendID); err != nil {
 		return fmt.Errorf("accept friend: %w", err)

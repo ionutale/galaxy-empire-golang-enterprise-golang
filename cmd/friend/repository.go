@@ -63,8 +63,8 @@ func (r *PostgresRepository) GetFriends(ctx context.Context, playerID int) ([]Fr
 		SELECT id, player_id, friend_id, status, created_at, updated_at
 		FROM friend.friendships
 		WHERE player_id = $1
-		ORDER BY created_at DESC
-	`, playerID)
+		ORDER BY created_at DESC LIMIT 200
+`, playerID)
 	if err != nil {
 		return nil, fmt.Errorf("get friends: %w", err)
 	}

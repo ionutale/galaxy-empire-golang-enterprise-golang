@@ -230,8 +230,8 @@ func (r *PostgresRepository) GetBulletins(ctx context.Context, allianceID int) (
 		SELECT id, alliance_id, author_player_id, title, content, created_at, updated_at
 		FROM alliance.bulletins
 		WHERE alliance_id = $1
-		ORDER BY created_at DESC
-	`, allianceID)
+		ORDER BY created_at DESC LIMIT 50
+`, allianceID)
 	if err != nil {
 		return nil, fmt.Errorf("get bulletins: %w", err)
 	}
@@ -295,8 +295,8 @@ func (r *PostgresRepository) GetSharedReports(ctx context.Context, allianceID in
 		SELECT id, alliance_id, report_id, shared_by, shared_at
 		FROM alliance.shared_reports
 		WHERE alliance_id = $1
-		ORDER BY shared_at DESC
-	`, allianceID)
+		ORDER BY id DESC LIMIT 50
+`, allianceID)
 	if err != nil {
 		return nil, fmt.Errorf("get shared reports: %w", err)
 	}

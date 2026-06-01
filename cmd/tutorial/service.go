@@ -70,22 +70,8 @@ func (s *TutorialService) ClaimReward(ctx context.Context, playerID, stepID int)
 		return nil, fmt.Errorf("step %d requirements not met", stepID)
 	}
 
-	if step.RewardDM > 0 {
-		if err := s.repo.AddDarkMatter(ctx, playerID, step.RewardDM); err != nil {
-			slog.Error("add dm reward", "step", stepID, "error", err)
-		}
-	}
-
-	if len(step.RewardResources) > 0 {
-		metal := step.RewardResources["metal"]
-		crystal := step.RewardResources["crystal"]
-		if metal > 0 || crystal > 0 {
-			if err := s.repo.AddPlayerResources(ctx, playerID, metal, crystal); err != nil {
-				slog.Error("add resource reward", "step", stepID, "error", err)
-			}
-		}
-	}
-
+	// Advance step FIRST — this is the idempotency gate.
+	// Rewards are only granted after the step is successfully advanced.
 	completed := false
 	nextStep := stepID + 1
 	if nextStep > len(TutorialSteps) {
@@ -96,6 +82,23 @@ func (s *TutorialService) ClaimReward(ctx context.Context, playerID, stepID int)
 	} else {
 		if err := s.repo.AdvanceStep(ctx, playerID); err != nil {
 			return nil, err
+		}
+	}
+
+	// Grant rewards only after successful step advancement.
+	if step.RewardDM > 0 {
+		if err := s.repo.AddDarkMatter(ctx, playerID, step.RewardDM); err != nil {
+			slog.Error("add dm reward — step advanced but reward lost", "step", stepID, "error", err)
+		}
+	}
+
+	if len(step.RewardResources) > 0 {
+		metal := step.RewardResources["metal"]
+		crystal := step.RewardResources["crystal"]
+		if metal > 0 || crystal > 0 {
+			if err := s.repo.AddPlayerResources(ctx, playerID, metal, crystal); err != nil {
+				slog.Error("add resource reward — step advanced but reward lost", "step", stepID, "error", err)
+			}
 		}
 	}
 

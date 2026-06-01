@@ -110,15 +110,24 @@ func main() {
 								targetPlanetID, err := svc.FindTargetPlanet(fleetCtx, f.TargetGalaxy, f.TargetSystem, f.TargetPosition)
 								if err != nil {
 									slog.Error("transport: find planet", "fleet", f.ID, "error", err)
-									repo.MarkFleetArrived(fleetCtx, f.ID)
-								} else {
-									metalAmt := 10000
-									crystalAmt := 5000
-									if err := svc.AddResourcesToPlanet(fleetCtx, targetPlanetID, "metal", metalAmt); err != nil {
-										slog.Error("transport: add metal", "fleet", f.ID, "error", err)
+									if err := repo.MarkFleetArrived(fleetCtx, f.ID); err != nil {
+										slog.Error("transport: mark arrived", "fleet", f.ID, "error", err)
 									}
-									if err := svc.AddResourcesToPlanet(fleetCtx, targetPlanetID, "crystal", crystalAmt); err != nil {
-										slog.Error("transport: add crystal", "fleet", f.ID, "error", err)
+								} else {
+									if f.CargoMetal > 0 {
+										if err := svc.AddResourcesToPlanet(fleetCtx, targetPlanetID, "metal", f.CargoMetal); err != nil {
+											slog.Error("transport: add metal", "fleet", f.ID, "error", err)
+										}
+									}
+									if f.CargoCrystal > 0 {
+										if err := svc.AddResourcesToPlanet(fleetCtx, targetPlanetID, "crystal", f.CargoCrystal); err != nil {
+											slog.Error("transport: add crystal", "fleet", f.ID, "error", err)
+										}
+									}
+									if f.CargoGas > 0 {
+										if err := svc.AddResourcesToPlanet(fleetCtx, targetPlanetID, "gas", f.CargoGas); err != nil {
+											slog.Error("transport: add gas", "fleet", f.ID, "error", err)
+										}
 									}
 									forwardDuration := time.Since(f.CreatedAt)
 									returnArrivesAt := time.Now().Add(forwardDuration)

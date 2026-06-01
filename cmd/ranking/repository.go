@@ -34,8 +34,14 @@ func (r *PostgresRepository) UpsertScore(ctx context.Context, s PlayerScore) err
 		INSERT INTO ranking.player_scores (player_id, player_name, total_score, fleet_score, buildings_score, research_score, defense_score, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT (player_id)
-		DO UPDATE SET player_name = $2, total_score = $3, fleet_score = $4,
-		              buildings_score = $5, research_score = $6, defense_score = $7, updated_at = $8
+		DO UPDATE SET
+			player_name     = CASE WHEN ranking.player_scores.player_name = '' OR ranking.player_scores.player_name IS NULL THEN $2 ELSE ranking.player_scores.player_name END,
+			total_score     = $3,
+			fleet_score     = $4,
+			buildings_score = $5,
+			research_score  = $6,
+			defense_score   = $7,
+			updated_at      = $8
 	`,
 		s.PlayerID, s.PlayerName, s.TotalScore, s.FleetScore,
 		s.BuildingsScore, s.ResearchScore, s.DefenseScore, s.UpdatedAt,

@@ -36,8 +36,8 @@ func (r *PostgresRepository) GetActiveEvents(ctx context.Context) ([]Event, erro
 		SELECT id, name, description, event_type, modifiers, starts_at, ends_at, status, created_at
 		FROM event.events
 		WHERE status = 'active'
-		ORDER BY ends_at
-	`)
+		ORDER BY ends_at LIMIT 100
+`)
 	if err != nil {
 		return nil, fmt.Errorf("get active events: %w", err)
 	}
