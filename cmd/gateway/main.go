@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,24 +34,44 @@ type Claims struct {
 }
 
 func main() {
-	planetAddr := os.Getenv("PLANET_SERVICE_ADDR")
-	if planetAddr == "" {
-		planetAddr = "http://localhost:8082"
-	}
-	authAddr := os.Getenv("AUTH_SERVICE_ADDR")
-	if authAddr == "" {
-		authAddr = "http://localhost:8081"
-	}
+	planetAddr := getEnv("PLANET_SERVICE_ADDR", "http://localhost:8082")
+	authAddr := getEnv("AUTH_SERVICE_ADDR", "http://localhost:8081")
+	espionageAddr := getEnv("ESPIONAGE_SERVICE_ADDR", "http://localhost:8086")
+	researchAddr := getEnv("RESEARCH_SERVICE_ADDR", "http://localhost:8085")
+	nebulaAddr := getEnv("NEBULA_SERVICE_ADDR", "http://localhost:8088")
+	allianceAddr := getEnv("ALLIANCE_SERVICE_ADDR", "http://localhost:8087")
+	chatAddr := getEnv("CHAT_SERVICE_ADDR", "http://localhost:8090")
+	notificationAddr := getEnv("NOTIFICATION_SERVICE_ADDR", "http://localhost:8093")
+	questAddr := getEnv("QUEST_SERVICE_ADDR", "http://localhost:8094")
+	eventAddr := getEnv("EVENT_SERVICE_ADDR", "http://localhost:8095")
+	radarAddr := getEnv("RADAR_SERVICE_ADDR", "http://localhost:8089")
+	fleetAddr := getEnv("FLEET_SERVICE_ADDR", "http://localhost:8083")
+	friendAddr := getEnv("FRIEND_SERVICE_ADDR", "http://localhost:8091")
+	rankingAddr := getEnv("RANKING_SERVICE_ADDR", "http://localhost:8092")
+	tutorialAddr := getEnv("TUTORIAL_SERVICE_ADDR", "http://localhost:8097")
+	adminAddr := getEnv("ADMIN_SERVICE_ADDR", "http://localhost:8096")
 	jwtKey := []byte(getEnv("JWT_SECRET", "dev-secret-change-in-production"))
+	shutdownTimeout := getEnvDuration("SHUTDOWN_TIMEOUT", 15*time.Second)
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+	rl := NewRateLimiter(100, 60*time.Second)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(rl.Middleware)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok","service":"gateway"}`))
+	})
+	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok","service":"gateway"}`))
+	})
+	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok","service":"gateway"}`))
 	})
@@ -62,9 +83,115 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(jwtMiddleware(jwtKey))
 			r.Get("/auth/me", proxyToService(authAddr))
+			r.Post("/auth/vacation/enable", proxyToService(authAddr))
+			r.Post("/auth/vacation/confirm", proxyToService(authAddr))
+			r.Post("/auth/vacation/disable", proxyToService(authAddr))
+			r.Get("/auth/vacation/status", proxyToService(authAddr))
 			r.Get("/planet/mine", proxyToService(planetAddr))
 			r.Post("/buildings/{type}/upgrade", proxyToService(planetAddr))
+			r.Post("/espionage/probe", proxyToService(espionageAddr))
+			r.Get("/espionage/reports", proxyToService(espionageAddr))
+			r.Get("/espionage/reports/{id}", proxyToService(espionageAddr))
+			r.Delete("/espionage/reports/{id}", proxyToService(espionageAddr))
+			r.Get("/research", proxyToService(researchAddr))
+			r.Post("/research/{type}/start", proxyToService(researchAddr))
+			r.Post("/research/{type}/cancel", proxyToService(researchAddr))
+			r.Get("/research/queue", proxyToService(researchAddr))
+			r.Get("/moon/{galaxy}/{system}/{position}/buildings", proxyToService(planetAddr))
+			r.Post("/moon/{galaxy}/{system}/{position}/buildings/{type}/upgrade", proxyToService(planetAddr))
+			r.Post("/moon/{galaxy}/{system}/{position}/build-iron-behemoth", proxyToService(planetAddr))
+			r.Post("/wormhole/link", proxyToService(planetAddr))
+			r.Post("/planet/{id}/rename", proxyToService(planetAddr))
+			r.Post("/planet/{id}/stargate/link", proxyToService(planetAddr))
+			r.Post("/planet/{id}/stargate/unlink", proxyToService(planetAddr))
+			r.Get("/planet/{id}/stargate/links", proxyToService(planetAddr))
+			r.Post("/api/alliance/create", proxyToService(allianceAddr))
+			r.Post("/api/alliance/apply", proxyToService(allianceAddr))
+			r.Post("/api/alliance/leave", proxyToService(allianceAddr))
+			r.Post("/api/alliance/transfer", proxyToService(allianceAddr))
+			r.Get("/api/alliance/my", proxyToService(allianceAddr))
+			r.Post("/api/alliance/bank/deposit", proxyToService(allianceAddr))
+			r.Post("/api/alliance/bank/withdraw", proxyToService(allianceAddr))
+			r.Get("/api/alliance/bank", proxyToService(allianceAddr))
+			r.Post("/api/alliance/bulletin", proxyToService(allianceAddr))
+			r.Get("/api/alliance/bulletins", proxyToService(allianceAddr))
+			r.Delete("/api/alliance/bulletins/{id}", proxyToService(allianceAddr))
+			r.Post("/api/alliance/share-report", proxyToService(allianceAddr))
+			r.Get("/api/alliance/shared-reports", proxyToService(allianceAddr))
+			r.Post("/api/alliance/unshare-report", proxyToService(allianceAddr))
+			r.Post("/api/radar/scan", proxyToService(radarAddr))
+			r.Post("/api/radar/events", proxyToService(radarAddr))
+			r.Post("/api/radar/events/resolve", proxyToService(radarAddr))
+			r.Post("/api/radar/planet-status", proxyToService(radarAddr))
+			r.Post("/api/radar/eu-scan", proxyToService(radarAddr))
+			r.Post("/api/nebula/dm/speed-up", proxyToService(nebulaAddr))
+			r.Post("/api/nebula/dm/estimate-cost", proxyToService(nebulaAddr))
+			r.Get("/api/nebula/dm/transactions", proxyToService(nebulaAddr))
+			r.Post("/api/nebula/commanders/hire", proxyToService(nebulaAddr))
+			r.Get("/api/nebula/commanders", proxyToService(nebulaAddr))
+			r.Get("/api/nebula/commanders/available", proxyToService(nebulaAddr))
+			r.Post("/api/nebula/credits-balance", proxyToService(nebulaAddr))
+			r.Post("/api/nebula/credits-spend", proxyToService(nebulaAddr))
+			r.Get("/api/nebula/credits-transactions", proxyToService(nebulaAddr))
+			r.Post("/api/nebula/daily-gift/claim", proxyToService(nebulaAddr))
+			r.Get("/api/nebula/daily-gift/status", proxyToService(nebulaAddr))
+			r.Get("/api/nebula/daily-tasks", proxyToService(nebulaAddr))
+			r.Post("/api/nebula/daily-tasks/{id}/progress", proxyToService(nebulaAddr))
+			r.Post("/api/nebula/daily-tasks/{id}/claim", proxyToService(nebulaAddr))
+			r.Post("/api/nebula/daily-tasks/reroll", proxyToService(nebulaAddr))
+			r.Post("/api/nebula/daily-tasks/claim-all", proxyToService(nebulaAddr))
+			r.Get("/api/nebula/store/items", proxyToService(nebulaAddr))
+			r.Post("/api/nebula/store/buy/{itemId}", proxyToService(nebulaAddr))
+			r.Get("/api/nebula/discoverer", proxyToService(nebulaAddr))
+			r.Post("/api/nebula/discoverer/upgrade", proxyToService(nebulaAddr))
+			r.Get("/api/planet/{id}/gems", proxyToService(planetAddr))
+			r.Post("/api/planet/{id}/gems/equip", proxyToService(planetAddr))
+			r.Post("/api/planet/{id}/gems/unequip", proxyToService(planetAddr))
+			r.Post("/api/planet/{id}/gems/combine", proxyToService(planetAddr))
+			r.Post("/chat/send", proxyToService(chatAddr))
+			r.Get("/chat/messages", proxyToService(chatAddr))
+			r.Post("/chat/private/send", proxyToService(chatAddr))
+			r.Get("/chat/private/inbox", proxyToService(chatAddr))
+			r.Get("/chat/private/outbox", proxyToService(chatAddr))
+			r.Post("/chat/private/read", proxyToService(chatAddr))
+			r.Delete("/chat/private/messages/{id}", proxyToService(chatAddr))
+			r.Get("/chat/private/unread-count", proxyToService(chatAddr))
+			r.Post("/api/friend/add", proxyToService(friendAddr))
+			r.Post("/api/friend/accept", proxyToService(friendAddr))
+			r.Get("/api/fleets", fleetProxy(fleetAddr))
+			r.Post("/api/fleets/dispatch", fleetProxy(fleetAddr))
+			r.Post("/api/fleet/merge", proxyToService(fleetAddr))
+			r.Post("/api/fleet/{id}/recall", proxyToService(fleetAddr))
+			r.Post("/api/fleet/{id}/split", proxyToService(fleetAddr))
+			r.Post("/api/friend/remove", proxyToService(friendAddr))
+			r.Get("/api/friend/list", proxyToService(friendAddr))
+			r.Get("/api/ranking/top", proxyToService(rankingAddr))
+			r.Get("/api/ranking/{playerId}", proxyToService(rankingAddr))
+			r.Get("/api/notification/list", proxyToService(notificationAddr))
+			r.Get("/api/notification/unread-count", proxyToService(notificationAddr))
+			r.Post("/api/notification/{id}/read", proxyToService(notificationAddr))
+			r.Post("/api/notification/read-all", proxyToService(notificationAddr))
+			r.Post("/api/quest/list", proxyToService(questAddr))
+			r.Post("/api/quest/{id}/claim", proxyToService(questAddr))
+			r.Get("/api/quest/completed", proxyToService(questAddr))
+			r.Get("/api/event/active", proxyToService(eventAddr))
+			r.Get("/api/event/all", proxyToService(eventAddr))
+			r.Post("/api/event/{id}/join", proxyToService(eventAddr))
+			r.Post("/api/event/{id}/claim", proxyToService(eventAddr))
+			r.Get("/api/admin/users", proxyToService(adminAddr))
+			r.Get("/api/admin/planets", proxyToService(adminAddr))
+			r.Post("/api/admin/planet/{id}/resources", proxyToService(adminAddr))
+			r.Post("/api/admin/player/{id}/dm", proxyToService(adminAddr))
+			r.Post("/api/admin/player/{id}/credits", proxyToService(adminAddr))
+			r.Post("/api/admin/player/{id}/ban", proxyToService(adminAddr))
+			r.Post("/api/admin/gm-message", proxyToService(adminAddr))
+			r.Post("/api/admin/event/create", proxyToService(adminAddr))
+			r.Get("/api/tutorial/status", proxyToService(tutorialAddr))
+			r.Post("/api/tutorial/{step}/claim", proxyToService(tutorialAddr))
+			r.Post("/api/tutorial/skip", proxyToService(tutorialAddr))
 		})
+		r.Get("/chat/stream", proxyToService(chatAddr))
+		r.Get("/notification/stream", proxyToService(notificationAddr))
 	})
 
 	srv := &http.Server{Addr: ":8080", Handler: r}
@@ -81,7 +208,7 @@ func main() {
 	<-quit
 
 	slog.Info("gateway shutting down")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	srv.Shutdown(ctx)
 }
@@ -162,6 +289,107 @@ func proxyToService(serviceAddr string) http.HandlerFunc {
 	}
 }
 
+func fleetProxy(addr string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		switch p {
+		case "/api/fleets":
+			p = "/api/fleet/my-fleets"
+		case "/api/fleets/dispatch":
+			p = "/api/fleet/dispatch"
+		}
+		targetURL := fmt.Sprintf("%s%s", addr, p)
+		if r.URL.RawQuery != "" {
+			targetURL += "?" + r.URL.RawQuery
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(ctx, r.Method, targetURL, r.Body)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+			return
+		}
+
+		for k, v := range r.Header {
+			req.Header[k] = v
+		}
+
+		if userID, ok := r.Context().Value(ctxKeyUserID).(int); ok {
+			req.Header.Set("X-User-ID", strconv.Itoa(userID))
+		}
+		if email, ok := r.Context().Value(ctxKeyEmail).(string); ok {
+			req.Header.Set("X-User-Email", email)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			slog.Error("proxy to fleet failed", "error", err)
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "service unavailable"})
+			return
+		}
+		defer resp.Body.Close()
+
+		for k, v := range resp.Header {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+	}
+}
+
+type RateLimiter struct {
+	mu       sync.Mutex
+	requests map[string]*tokenBucket
+	limit    int
+	window   time.Duration
+}
+
+type tokenBucket struct {
+	count    int
+	windowStart time.Time
+}
+
+func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
+	return &RateLimiter{
+		requests: make(map[string]*tokenBucket),
+		limit:    limit,
+		window:   window,
+	}
+}
+
+func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip := r.RemoteAddr
+		key := ip + ":" + r.Method + ":" + r.URL.Path
+
+		rl.mu.Lock()
+		bucket, exists := rl.requests[key]
+		now := time.Now()
+
+		if !exists || now.Sub(bucket.windowStart) > rl.window {
+			rl.requests[key] = &tokenBucket{count: 1, windowStart: now}
+			rl.mu.Unlock()
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		if bucket.count >= rl.limit {
+			rl.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", "60")
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte(`{"error":"rate limit exceeded","retry_after":60}`))
+			return
+		}
+
+		bucket.count++
+		rl.mu.Unlock()
+		next.ServeHTTP(w, r)
+	})
+}
+
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -171,6 +399,16 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		d, err := time.ParseDuration(v)
+		if err == nil {
+			return d
+		}
 	}
 	return fallback
 }

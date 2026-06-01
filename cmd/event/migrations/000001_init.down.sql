@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS event.event_participation CASCADE;
+
+DROP TABLE IF EXISTS event.events CASCADE;
+
+DROP SCHEMA IF EXISTS event CASCADE;

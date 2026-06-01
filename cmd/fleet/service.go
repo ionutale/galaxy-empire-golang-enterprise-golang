@@ -12,16 +12,28 @@ import (
 )
 
 type FleetService struct {
-	repo          Repository
-	planetBaseURL string
-	httpClient    *http.Client
+	repo           Repository
+	planetBaseURL  string
+	combatBaseURL  string
+	authBaseURL    string
+	internalSecret string
+	httpClient     *http.Client
 }
 
-func NewFleetService(repo Repository, planetBaseURL string) *FleetService {
+func NewFleetService(repo Repository, planetBaseURL string, combatBaseURL string, authBaseURL string, internalSecret string) *FleetService {
+	if combatBaseURL == "" {
+		combatBaseURL = "http://localhost:8084"
+	}
+	if authBaseURL == "" {
+		authBaseURL = "http://localhost:8081"
+	}
 	return &FleetService{
-		repo:          repo,
-		planetBaseURL: planetBaseURL,
-		httpClient:    &http.Client{Timeout: 10 * time.Second},
+		repo:           repo,
+		planetBaseURL:  planetBaseURL,
+		combatBaseURL:  combatBaseURL,
+		authBaseURL:    authBaseURL,
+		internalSecret: internalSecret,
+		httpClient:     &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -29,6 +41,7 @@ var validMissions = map[string]bool{
 	"attack": true, "acs_attack": true, "acs_defend": true,
 	"transport": true, "deploy": true, "espionage": true,
 	"colonize": true, "expedition": true, "recycle": true,
+	"stargate": true,
 }
 
 func (s *FleetService) DispatchFleet(ctx context.Context, playerID int, req DispatchRequest) (Fleet, error) {
@@ -96,26 +109,44 @@ func (s *FleetService) DispatchFleet(ctx context.Context, playerID int, req Disp
 	speedFactor := 1.0 + float64(100-req.SpeedPct)/100.0
 	fuelCost := int(float64(totalFuel) * distanceFactor * speedFactor)
 
-	if err := s.deductFuel(ctx, req.OriginPlanetID, fuelCost); err != nil {
-		return Fleet{}, fmt.Errorf("fuel deduction: %w", err)
+	if req.Mission != "stargate" {
+		if err := s.deductFuel(ctx, req.OriginPlanetID, fuelCost); err != nil {
+			return Fleet{}, fmt.Errorf("fuel deduction: %w", err)
+		}
 	}
 
-	if err := s.CheckFleetSlotLimit(ctx, playerID); err != nil {
-		return Fleet{}, err
+	if req.AllianceGroupID == 0 {
+		if err := s.CheckFleetSlotLimit(ctx, playerID); err != nil {
+			return Fleet{}, err
+		}
+	}
+
+	if req.Mission == "attack" || req.Mission == "acs_attack" {
+		if err := s.CheckAttackCooldown(ctx, playerID, req.TargetGalaxy, req.TargetSystem, req.TargetPosition); err != nil {
+			return Fleet{}, err
+		}
+		targetPlayerID, err := s.getTargetPlayerID(ctx, req.TargetGalaxy, req.TargetSystem, req.TargetPosition)
+		if err == nil {
+			inVacation, vErr := s.checkTargetVacationMode(ctx, targetPlayerID)
+			if vErr == nil && inVacation {
+				return Fleet{}, fmt.Errorf("target player is in vacation mode")
+			}
+		}
 	}
 
 	now := time.Now()
 	fleet := Fleet{
-		PlayerID:       playerID,
-		OriginPlanetID: req.OriginPlanetID,
-		TargetGalaxy:   req.TargetGalaxy,
-		TargetSystem:   req.TargetSystem,
-		TargetPosition: req.TargetPosition,
-		Mission:        req.Mission,
-		Status:         "in_transit",
-		SpeedPct:       req.SpeedPct,
-		Ships:          req.Ships,
-		ArrivesAt:      now.Add(travelDuration),
+		PlayerID:        playerID,
+		OriginPlanetID:  req.OriginPlanetID,
+		TargetGalaxy:    req.TargetGalaxy,
+		TargetSystem:    req.TargetSystem,
+		TargetPosition:  req.TargetPosition,
+		Mission:         req.Mission,
+		Status:          "in_transit",
+		SpeedPct:        req.SpeedPct,
+		Ships:           req.Ships,
+		ArrivesAt:       now.Add(travelDuration),
+		AllianceGroupID: req.AllianceGroupID,
 	}
 
 	return s.repo.CreateFleet(ctx, fleet)
@@ -289,6 +320,52 @@ func (s *FleetService) getPlanetCoords(ctx context.Context, planetID int) (plane
 	return planetCoords{coords.Galaxy, coords.System, coords.Position}, nil
 }
 
+func (s *FleetService) getTargetPlayerID(ctx context.Context, galaxy, system, position int) (int, error) {
+	body, _ := json.Marshal(map[string]int{
+		"galaxy": galaxy, "system": system, "position": position,
+	})
+	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/planet/info", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return 0, fmt.Errorf("planet service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("planet not found at coordinates")
+	}
+	var result struct {
+		PlayerID int `json:"player_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("parse response: %w", err)
+	}
+	return result.PlayerID, nil
+}
+
+func (s *FleetService) checkTargetVacationMode(ctx context.Context, targetPlayerID int) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		fmt.Sprintf("%s/api/auth/user/%d/vacation-status", s.authBaseURL, targetPlayerID), nil)
+	if err != nil {
+		return false, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("X-Internal-Secret", s.internalSecret)
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("auth service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("auth service: status %d", resp.StatusCode)
+	}
+	var result struct {
+		VacationModeEnabled bool `json:"vacation_mode_enabled"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, fmt.Errorf("parse response: %w", err)
+	}
+	return result.VacationModeEnabled, nil
+}
+
 func (s *FleetService) getPlayerTechLevels(ctx context.Context, playerID int) (map[string]int, error) {
 	body, _ := json.Marshal(map[string]int{"player_id": playerID})
 	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/player/techs", "application/json", bytes.NewReader(body))
@@ -338,4 +415,308 @@ func (s *FleetService) deductFuel(ctx context.Context, planetID, amount int) err
 	}
 	resp.Body.Close()
 	return nil
+}
+
+func (s *FleetService) AddResourcesToPlanet(ctx context.Context, planetID int, resource string, amount int) error {
+	body, _ := json.Marshal(map[string]any{
+		"planet_id": planetID,
+		"resource":  resource,
+		"amount":    amount,
+	})
+	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/resources/add", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("planet service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("planet service: %s", string(respBody))
+	}
+	return nil
+}
+
+func (s *FleetService) AddShipsToPlanet(ctx context.Context, planetID int, ships map[string]int) error {
+	body, _ := json.Marshal(map[string]any{
+		"planet_id": planetID,
+		"ships":     ships,
+	})
+	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/ships/add", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("planet service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("planet service: %s", string(respBody))
+	}
+	return nil
+}
+
+func (s *FleetService) checkStarGateLink(ctx context.Context, originPlanetID, targetGalaxy, targetSystem, targetPosition int) (bool, error) {
+	targetPlanetID, err := s.FindTargetPlanet(ctx, targetGalaxy, targetSystem, targetPosition)
+	if err != nil {
+		return false, fmt.Errorf("target planet not found: %w", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"origin_planet_id": originPlanetID,
+		"target_planet_id": targetPlanetID,
+	})
+	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/stargate/check-link", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return false, fmt.Errorf("planet service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("planet service: %s", string(respBody))
+	}
+	var result struct {
+		HasLink bool `json:"has_link"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, fmt.Errorf("parse response: %w", err)
+	}
+	return result.HasLink, nil
+}
+
+func (s *FleetService) FindTargetPlanet(ctx context.Context, galaxy, system, position int) (int, error) {
+	body, _ := json.Marshal(map[string]int{
+		"galaxy":   galaxy,
+		"system":   system,
+		"position": position,
+	})
+	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/planet/by-coords", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return 0, fmt.Errorf("planet service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("no planet at those coordinates")
+	}
+	var result struct {
+		PlanetID int `json:"planet_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, fmt.Errorf("parse response: %w", err)
+	}
+	return result.PlanetID, nil
+}
+
+type combatResolveResp struct {
+	ReportID     int            `json:"report_id"`
+	AttackerWon  bool           `json:"attacker_won"`
+	Rounds       int            `json:"rounds"`
+	AttackerLoot map[string]int `json:"attacker_loot,omitempty"`
+	DebrisMetal  int            `json:"debris_metal"`
+	DebrisCrystal int           `json:"debris_crystal"`
+}
+
+func (s *FleetService) resolveCombatForArrival(ctx context.Context, f Fleet, extraAttackerShips map[string]int) error {
+	defendFleets, err := s.repo.GetACSDefendFleets(ctx, f.TargetGalaxy, f.TargetSystem, f.TargetPosition)
+	if err != nil {
+		slog.Warn("failed to get ACS defend fleets", "error", err)
+	}
+
+	defenderShips := make(map[string]int)
+	for _, df := range defendFleets {
+		for shipType, qty := range df.Ships {
+			defenderShips[shipType] += qty
+		}
+	}
+
+	attackerShips := make(map[string]int)
+	for k, v := range f.Ships {
+		attackerShips[k] += v
+	}
+	for k, v := range extraAttackerShips {
+		attackerShips[k] += v
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"fleet_id":                f.ID,
+		"attacker_player_id":      f.PlayerID,
+		"attacker_origin_planet_id": f.OriginPlanetID,
+		"attacker_ships":          attackerShips,
+		"target_galaxy":           f.TargetGalaxy,
+		"target_system":           f.TargetSystem,
+		"target_position":         f.TargetPosition,
+		"defender_ships":          defenderShips,
+	})
+	resp, err := s.httpClient.Post(s.combatBaseURL+"/combat/resolve", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("combat service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("combat service: %s", string(respBody))
+	}
+	var cr combatResolveResp
+	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
+		return fmt.Errorf("parse combat response: %w", err)
+	}
+	slog.Info("combat resolved",
+		"fleet", f.ID,
+		"report", cr.ReportID,
+		"attacker_won", cr.AttackerWon,
+		"rounds", cr.Rounds,
+		"debris_metal", cr.DebrisMetal,
+		"debris_crystal", cr.DebrisCrystal,
+	)
+
+	if cr.DebrisMetal > 0 || cr.DebrisCrystal > 0 {
+		if err := s.repo.UpsertDebrisField(ctx, f.TargetGalaxy, f.TargetSystem, f.TargetPosition, cr.DebrisMetal, cr.DebrisCrystal); err != nil {
+			slog.Error("upsert debris field", "error", err)
+		}
+	}
+
+	return nil
+}
+
+func (s *FleetService) AutoReturnIfVacationMode(ctx context.Context, f Fleet) (bool, error) {
+	targetPlayerID, err := s.getTargetPlayerID(ctx, f.TargetGalaxy, f.TargetSystem, f.TargetPosition)
+	if err != nil {
+		return false, fmt.Errorf("get target player: %w", err)
+	}
+	inVacation, err := s.checkTargetVacationMode(ctx, targetPlayerID)
+	if err != nil {
+		return false, fmt.Errorf("check vacation mode: %w", err)
+	}
+	if !inVacation {
+		return false, nil
+	}
+	forwardDuration := time.Since(f.CreatedAt)
+	returnArrivesAt := time.Now().Add(forwardDuration)
+	if err := s.repo.SetFleetReturning(ctx, f.ID, returnArrivesAt); err != nil {
+		return false, fmt.Errorf("set returning: %w", err)
+	}
+	slog.Info("fleet auto-returned due to target vacation mode", "fleet", f.ID)
+	return true, nil
+}
+
+func (s *FleetService) CheckAttackCooldown(ctx context.Context, attackerID, targetGalaxy, targetSystem, targetPosition int) error {
+	lastAttack, err := s.repo.GetAttackCooldown(ctx, attackerID, targetGalaxy, targetSystem, targetPosition)
+	if err != nil {
+		return err
+	}
+	if lastAttack != nil {
+		elapsed := time.Since(*lastAttack)
+		cooldown := 2 * time.Hour
+		if elapsed < cooldown {
+			remaining := cooldown - elapsed
+			minutes := int(remaining.Minutes())
+			return fmt.Errorf("attack cooldown active, remaining %d minutes", minutes)
+		}
+	}
+	return nil
+}
+
+func (s *FleetService) allACSFleetsArrived(ctx context.Context, allianceGroupID int) (bool, error) {
+	fleets, err := s.repo.GetACSGroupFleets(ctx, allianceGroupID)
+	if err != nil {
+		return false, err
+	}
+	if len(fleets) == 0 {
+		return false, nil
+	}
+	for _, f := range fleets {
+		if f.Status == "in_transit" || f.Status == "returning" {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (s *FleetService) harvestDebris(ctx context.Context, fleetID int, fleetShips map[string]int, originPlanetID, targetGalaxy, targetSystem, targetPosition int) error {
+	recyclerQty := fleetShips["recycler"]
+	if recyclerQty == 0 {
+		return fmt.Errorf("no recyclers in fleet")
+	}
+
+	cargoCapacity := recyclerQty * 20000
+
+	debris, err := s.repo.GetDebrisField(ctx, targetGalaxy, targetSystem, targetPosition)
+	if err != nil {
+		return fmt.Errorf("get debris field: %w", err)
+	}
+	if debris == nil {
+		slog.Warn("no debris field at target", "galaxy", targetGalaxy, "system", targetSystem, "position", targetPosition)
+		return nil
+	}
+
+	totalAvailable := debris.Metal + debris.Crystal
+	if totalAvailable == 0 {
+		return nil
+	}
+
+	toHarvest := totalAvailable
+	if toHarvest > cargoCapacity {
+		toHarvest = cargoCapacity
+	}
+
+	harvestMetal := debris.Metal * toHarvest / totalAvailable
+	harvestCrystal := toHarvest - harvestMetal
+
+	if harvestMetal > debris.Metal {
+		harvestMetal = debris.Metal
+	}
+	if harvestCrystal > debris.Crystal {
+		harvestCrystal = debris.Crystal
+	}
+
+	newMetal := debris.Metal - harvestMetal
+	newCrystal := debris.Crystal - harvestCrystal
+	if err := s.repo.UpdateDebrisField(ctx, targetGalaxy, targetSystem, targetPosition, newMetal, newCrystal); err != nil {
+		return fmt.Errorf("update debris field: %w", err)
+	}
+
+	if harvestMetal > 0 {
+		if err := s.AddResourcesToPlanet(ctx, originPlanetID, "metal", harvestMetal); err != nil {
+			return fmt.Errorf("add metal to origin: %w", err)
+		}
+	}
+	if harvestCrystal > 0 {
+		if err := s.AddResourcesToPlanet(ctx, originPlanetID, "crystal", harvestCrystal); err != nil {
+			return fmt.Errorf("add crystal to origin: %w", err)
+		}
+	}
+
+	slog.Info("debris harvested",
+		"fleet", fleetID,
+		"metal", harvestMetal,
+		"crystal", harvestCrystal,
+	)
+	return nil
+}
+
+func (s *FleetService) handleColonizeArrival(ctx context.Context, f Fleet) error {
+	existingID, err := s.FindTargetPlanet(ctx, f.TargetGalaxy, f.TargetSystem, f.TargetPosition)
+	if err == nil && existingID > 0 {
+		return fmt.Errorf("target position already occupied")
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":  f.PlayerID,
+		"galaxy":   f.TargetGalaxy,
+		"system":   f.TargetSystem,
+		"position": f.TargetPosition,
+	})
+	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/planet/create", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("planet service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("planet service: %s", string(respBody))
+	}
+
+	ships := f.Ships
+	delete(ships, "colony_ship")
+	if err := s.repo.UpdateFleetShips(ctx, f.ID, ships); err != nil {
+		return fmt.Errorf("update fleet ships: %w", err)
+	}
+
+	return s.repo.MarkFleetArrived(ctx, f.ID)
 }

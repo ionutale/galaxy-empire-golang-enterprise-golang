@@ -1,8 +1,22 @@
 go 1.22
 
 use (
-	./cmd/gateway
-	./cmd/planet
+	./cmd/admin
+	./cmd/alliance
 	./cmd/auth
+	./cmd/chat
+	./cmd/combat
+	./cmd/espionage
+	./cmd/event
 	./cmd/fleet
+	./cmd/friend
+	./cmd/gateway
+	./cmd/nebula
+	./cmd/notification
+	./cmd/planet
+	./cmd/quest
+	./cmd/radar
+	./cmd/ranking
+	./cmd/research
+	./cmd/tutorial
 )

@@ -8,6 +8,44 @@
 *.out
 go.work.sum
 
+# Compiled service binaries (built in repo root or in cmd/<svc>/)
+/admin
+/alliance
+/auth
+/chat
+/combat
+/espionage
+/event
+/fleet
+/friend
+/gateway
+/nebula
+/notification
+/planet
+/quest
+/radar
+/ranking
+/research
+/tutorial
+cmd/*/admin
+cmd/*/alliance
+cmd/*/auth
+cmd/*/chat
+cmd/*/combat
+cmd/*/espionage
+cmd/*/event
+cmd/*/fleet
+cmd/*/friend
+cmd/*/gateway
+cmd/*/nebula
+cmd/*/notification
+cmd/*/planet
+cmd/*/quest
+cmd/*/radar
+cmd/*/ranking
+cmd/*/research
+cmd/*/tutorial
+
 # Node
 node_modules/
 npm-debug.log*
@@ -35,7 +73,3 @@ pgdata/
 # Environment
 .env
 .env.local
-planet/
-auth/
-gateway/
-

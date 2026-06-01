@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -100,4 +101,109 @@ func generateToken(userID int, email string, jwtKey []byte) (string, error) {
 
 func toUserResponse(u User) UserResponse {
 	return UserResponse{ID: u.ID, Email: u.Email, CreatedAt: u.CreatedAt}
+}
+
+const vacationCooldownHours = 48
+
+func (s *AuthService) EnableVacation(ctx context.Context, userID int) error {
+	return s.repo.SetVacationStart(ctx, userID)
+}
+
+func (s *AuthService) ConfirmVacation(ctx context.Context, userID int) error {
+	enabled, startedAt, err := s.repo.GetVacationStatus(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if enabled {
+		return nil
+	}
+	if startedAt == nil {
+		return fmt.Errorf("%w: vacation mode not initiated", ErrValidation)
+	}
+	if time.Since(*startedAt) < vacationCooldownHours*time.Hour {
+		remaining := vacationCooldownHours*time.Hour - time.Since(*startedAt)
+		return fmt.Errorf("%w: %.0f hours remaining before vacation can be confirmed", ErrValidation, remaining.Hours())
+	}
+	return s.repo.SetVacationEnabled(ctx, userID, true)
+}
+
+func (s *AuthService) DisableVacation(ctx context.Context, userID int) error {
+	return s.repo.ClearVacationMode(ctx, userID)
+}
+
+func (s *AuthService) GetVacationStatus(ctx context.Context, userID int) (VacationStatusResponse, error) {
+	enabled, startedAt, err := s.repo.GetVacationStatus(ctx, userID)
+	if err != nil {
+		return VacationStatusResponse{}, err
+	}
+	resp := VacationStatusResponse{
+		Enabled:   enabled,
+		CanConfirm: false,
+	}
+	if startedAt != nil {
+		t := startedAt.Format(time.RFC3339)
+		resp.StartedAt = &t
+		elapsed := time.Since(*startedAt)
+		if elapsed >= vacationCooldownHours*time.Hour {
+			resp.CanConfirm = true
+			resp.RemainingHours = 0
+		} else {
+			resp.RemainingHours = (vacationCooldownHours*time.Hour - elapsed).Hours()
+		}
+	}
+	return resp, nil
+}
+
+func (s *AuthService) GetUserVacationStatus(ctx context.Context, userID int) (UserVacationStatusResponse, error) {
+	enabled, err := s.repo.GetVacationEnabled(ctx, userID)
+	if err != nil {
+		return UserVacationStatusResponse{}, err
+	}
+	return UserVacationStatusResponse{VacationModeEnabled: enabled}, nil
+}
+
+func (s *AuthService) JWTMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing authorization header"})
+			return
+		}
+		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenStr == authHeader {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid authorization format"})
+			return
+		}
+		claims := &Claims{}
+		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
+			return s.jwtKey, nil
+		})
+		if err != nil || !token.Valid {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired token"})
+			return
+		}
+		ctx := context.WithValue(r.Context(), ctxKeyUserID, claims.UserID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+type contextKey string
+
+const ctxKeyUserID contextKey = "user_id"
+
+func UserIDFromContext(ctx context.Context) (int, bool) {
+	id, ok := ctx.Value(ctxKeyUserID).(int)
+	return id, ok
+}
+
+func InternalSecretMiddleware(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Internal-Secret") != secret {
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }

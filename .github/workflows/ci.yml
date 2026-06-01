@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  vet:
+    name: Go Vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Go vet
+        run: go vet ./cmd/...
+
+  test:
+    name: Go Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: galaxy
+          POSTGRES_PASSWORD: galaxy_dev
+          POSTGRES_DB: galaxy_empire
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready -U galaxy -d galaxy_empire
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Run tests
+        run: go test ./cmd/...
+        env:
+          DATABASE_URL: postgres://galaxy:galaxy_dev@localhost:5432/galaxy_empire?sslmode=disable
+
+  build:
+    name: Go Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Build all services
+        run: |
+          for dir in cmd/*/; do
+            echo "Building $dir..."
+            (cd "$dir" && go build -o /dev/null .)
+          done

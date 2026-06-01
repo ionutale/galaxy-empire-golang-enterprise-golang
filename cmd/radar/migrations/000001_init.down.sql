@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS radar.eu_x_radars CASCADE;
+
+DROP TABLE IF EXISTS radar.radar_events CASCADE;
+
+DROP SCHEMA IF EXISTS radar CASCADE;

@@ -21,9 +21,10 @@ func (m *mockRepo) Create(_ context.Context, email, passwordHash string) (User, 
 	m.nextID++
 	u := User{
 		ID: m.nextID, Email: email,
-		PasswordHash: passwordHash,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		PasswordHash:       passwordHash,
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+		VacationModeEnabled: false,
 	}
 	m.users = append(m.users, u)
 	return u, nil
@@ -45,6 +46,56 @@ func (m *mockRepo) FindByID(_ context.Context, id int) (User, error) {
 		}
 	}
 	return User{}, ErrUserNotFound
+}
+
+func (m *mockRepo) SetVacationStart(_ context.Context, id int) error {
+	for i, u := range m.users {
+		if u.ID == id {
+			now := time.Now()
+			m.users[i].VacationModeStartedAt = &now
+			return nil
+		}
+	}
+	return ErrUserNotFound
+}
+
+func (m *mockRepo) SetVacationEnabled(_ context.Context, id int, enabled bool) error {
+	for i, u := range m.users {
+		if u.ID == id {
+			m.users[i].VacationModeEnabled = enabled
+			return nil
+		}
+	}
+	return ErrUserNotFound
+}
+
+func (m *mockRepo) ClearVacationMode(_ context.Context, id int) error {
+	for i, u := range m.users {
+		if u.ID == id {
+			m.users[i].VacationModeEnabled = false
+			m.users[i].VacationModeStartedAt = nil
+			return nil
+		}
+	}
+	return ErrUserNotFound
+}
+
+func (m *mockRepo) GetVacationStatus(_ context.Context, id int) (bool, *time.Time, error) {
+	for _, u := range m.users {
+		if u.ID == id {
+			return u.VacationModeEnabled, u.VacationModeStartedAt, nil
+		}
+	}
+	return false, nil, ErrUserNotFound
+}
+
+func (m *mockRepo) GetVacationEnabled(_ context.Context, id int) (bool, error) {
+	for _, u := range m.users {
+		if u.ID == id {
+			return u.VacationModeEnabled, nil
+		}
+	}
+	return false, ErrUserNotFound
 }
 
 func TestRegister_Success(t *testing.T) {

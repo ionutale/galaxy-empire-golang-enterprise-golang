@@ -27,6 +27,7 @@ var Ships = []ShipConfig{
 	{Type: "battleship", Name: "Battleship", Metal: 45000, Crystal: 15000, Speed: 10000, Cargo: 1500, Fuel: 1000, Strength: 200, Shield: 200, Attack: 1000},
 	{Type: "dreadnought", Name: "Dreadnought", Metal: 90000, Crystal: 45000, Gas: 15000, Speed: 5000, Cargo: 2500, Fuel: 2000, Strength: 700, Shield: 500, Attack: 4000},
 	{Type: "bomber", Name: "Bomber", Metal: 50000, Crystal: 25000, Gas: 15000, Speed: 4000, Cargo: 500, Fuel: 1000, Strength: 500, Shield: 500, Attack: 1000},
+	{Type: "iron_behemoth", Name: "Iron Behemoth", Metal: 350000, Crystal: 4000, Gas: 5500, Speed: 7000, Cargo: 5000, Fuel: 3000, Strength: 3000, Shield: 3000, Attack: 5000},
 }
 
 func shipConfig(shipType string) (ShipConfig, bool) {

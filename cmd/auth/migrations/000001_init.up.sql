@@ -1,4 +1,3 @@
--- +goose Up
 CREATE SCHEMA IF NOT EXISTS auth;
 
 CREATE TABLE IF NOT EXISTS auth.users (
@@ -9,6 +8,6 @@ CREATE TABLE IF NOT EXISTS auth.users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- +goose Down
-DROP TABLE IF EXISTS auth.users;
-DROP SCHEMA IF EXISTS auth;
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS vacation_mode_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS vacation_mode_started_at TIMESTAMPTZ;

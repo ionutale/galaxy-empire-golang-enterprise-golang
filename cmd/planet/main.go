@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -47,12 +48,43 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok","service":"planet"}`))
 	})
+	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok","service":"planet"}`))
+	})
+	r.Get("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		pingCtx, pingCancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer pingCancel()
+		if err := pool.Ping(pingCtx); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"status":"unavailable","error":err.Error()})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok","service":"planet"}`))
+	})
 
 	r.Post("/internal/ships/deduct", h.InternalDeductShips)
+	r.Post("/internal/ships/add", h.InternalAddShips)
 	r.Post("/internal/planet/coords", h.InternalGetPlanetCoords)
+	r.Post("/internal/planet/by-coords", h.InternalFindPlanetByCoords)
 	r.Post("/internal/resources/deduct", h.InternalDeductResource)
+	r.Post("/internal/resources/add", h.InternalAddResource)
 	r.Post("/internal/player/techs", h.InternalGetPlayerTechs)
+	r.Post("/internal/planet/info", h.InternalGetPlanetInfo)
+	r.Post("/internal/planet/create", h.InternalCreatePlanet)
+	r.Post("/internal/defense/repair", h.InternalDefenseRepair)
+	r.Post("/internal/defense/deduct", h.InternalDefenseDeduct)
+	r.Post("/internal/defense/list", h.InternalDefenseList)
+	r.Post("/internal/player/tech/add", h.InternalAddTechLevel)
+	r.Post("/internal/player/tech-level", h.InternalGetPlayerTechLevel)
+	r.Post("/internal/planet/building-level", h.InternalGetBuildingLevel)
+	r.Post("/internal/player/highest-lab", h.InternalGetHighestLabLevel)
+	r.Post("/internal/moon/building-level", h.InternalGetMoonBuildingLevel)
+	r.Post("/internal/wormhole/info", h.InternalWormholeInfo)
 	r.Get("/api/planet/mine", h.GetMyPlanet)
+	r.Post("/api/planet/{id}/rename", h.RenamePlanet)
 	r.Post("/api/buildings/{type}/upgrade", h.StartUpgrade)
 	r.Post("/api/buildings/{type}/cancel", h.CancelUpgrade)
 	r.Post("/api/buildings/{type}/deconstruct", h.DeconstructBuilding)
@@ -63,6 +95,35 @@ func main() {
 
 	r.Get("/api/shipyard", h.ListShips)
 	r.Post("/api/shipyard/build", h.BuildShips)
+
+	r.Get("/api/defense", h.ListDefenses)
+	r.Post("/api/defense/build", h.BuildDefenses)
+
+	r.Get("/api/moon/{galaxy}/{system}/{position}/buildings", h.GetMoonBuildings)
+	r.Post("/api/moon/{galaxy}/{system}/{position}/buildings/{type}/upgrade", h.UpgradeMoonBuilding)
+	r.Post("/api/moon/{galaxy}/{system}/{position}/build-iron-behemoth", h.BuildIronBehemoth)
+	r.Post("/api/wormhole/link", h.LinkWormholes)
+	r.Post("/api/planet/{id}/stargate/link", h.StarGateLink)
+	r.Post("/api/planet/{id}/stargate/unlink", h.StarGateUnlink)
+	r.Get("/api/planet/{id}/stargate/links", h.StarGateLinks)
+	r.Post("/internal/stargate/check-link", h.InternalCheckStarGateLink)
+	r.Post("/internal/defense/deduct-abms", h.InternalDeductABMs)
+
+	r.Post("/api/planet/{id}/missile/build-ipm", h.BuildIPM)
+	r.Post("/api/planet/{id}/missile/build-abm", h.BuildABM)
+	r.Get("/api/planet/{id}/missile/count", h.GetMissileCounts)
+	r.Post("/api/planet/{id}/missile/launch", h.LaunchIPMs)
+
+	r.Get("/api/planet/{id}/gems", h.GetGems)
+	r.Post("/api/planet/{id}/gems/equip", h.EquipGem)
+	r.Post("/api/planet/{id}/gems/unequip", h.UnequipGem)
+	r.Post("/api/planet/{id}/gems/combine", h.CombineGem)
+
+	r.Post("/internal/planet/gem-bonuses", h.InternalGemBonuses)
+	r.Post("/internal/npc/seed", h.InternalSeedNPC)
+	r.Post("/internal/npc/seed-all", h.InternalSeedAllNPC)
+	r.Post("/internal/npc/clear", h.InternalClearNPC)
+	r.Post("/internal/npc/check", h.InternalCheckNPC)
 
 	srv := &http.Server{Addr: ":8082", Handler: r}
 	go func() {
@@ -78,7 +139,8 @@ func main() {
 	<-quit
 
 	slog.Info("planet service shutting down")
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownTimeout := getEnvDuration("SHUTDOWN_TIMEOUT", 15*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 	srv.Shutdown(shutdownCtx)
 }
@@ -86,6 +148,16 @@ func main() {
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		d, err := time.ParseDuration(v)
+		if err == nil {
+			return d
+		}
 	}
 	return fallback
 }
@@ -137,6 +209,20 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := pool.Exec(ctx, `
 		ALTER TABLE planet.planets
 		ADD COLUMN IF NOT EXISTS temperature INTEGER NOT NULL DEFAULT 20;
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		ALTER TABLE planet.planets
+		ADD COLUMN IF NOT EXISTS missile_ipms INTEGER NOT NULL DEFAULT 0;
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		ALTER TABLE planet.planets
+		ADD COLUMN IF NOT EXISTS missile_abms INTEGER NOT NULL DEFAULT 0;
 	`); err != nil {
 		return err
 	}
@@ -231,6 +317,31 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			WHERE b.planet_id = p.id AND b.type = t.btype
 		);
 	`	); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO planet.buildings (planet_id, type, level)
+		SELECT p.id, btype, 0
+		FROM planet.planets p
+		CROSS JOIN (VALUES ('small_shield_dome'), ('large_shield_dome')) AS t(btype)
+		WHERE NOT EXISTS (
+			SELECT 1 FROM planet.buildings b
+			WHERE b.planet_id = p.id AND b.type = t.btype
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO planet.buildings (planet_id, type, level)
+		SELECT p.id, 'missile_silo', 1
+		FROM planet.planets p
+		WHERE NOT EXISTS (
+			SELECT 1 FROM planet.buildings b
+			WHERE b.planet_id = p.id AND b.type = 'missile_silo'
+		);
+	`); err != nil {
 		return err
 	}
 
@@ -333,6 +444,129 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		WHERE NOT EXISTS (
 			SELECT 1 FROM planet.player_ships ps
 			WHERE ps.planet_id = p.id AND ps.ship_type = s.ship_type
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.player_defenses (
+			id SERIAL PRIMARY KEY,
+			planet_id INT NOT NULL REFERENCES planet.planets(id) ON DELETE CASCADE,
+			defense_type VARCHAR(50) NOT NULL,
+			quantity INT NOT NULL DEFAULT 0,
+			UNIQUE(planet_id, defense_type)
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO planet.player_defenses (planet_id, defense_type, quantity)
+		SELECT p.id, d.defense_type, 0
+		FROM planet.planets p
+		CROSS JOIN (VALUES ('rocket_launcher'), ('light_laser'), ('heavy_laser'), ('mk2_cannon'), ('ion_cannon'), ('plasma_cannon'), ('proton_cannon')) AS d(defense_type)
+		WHERE NOT EXISTS (
+			SELECT 1 FROM planet.player_defenses pd
+			WHERE pd.planet_id = p.id AND pd.defense_type = d.defense_type
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.moon_buildings (
+			id SERIAL PRIMARY KEY,
+			moon_galaxy INT NOT NULL,
+			moon_system INT NOT NULL,
+			moon_position INT NOT NULL,
+			type VARCHAR(50) NOT NULL,
+			level INT NOT NULL DEFAULT 0,
+			UNIQUE(moon_galaxy, moon_system, moon_position, type)
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO planet.moon_buildings (moon_galaxy, moon_system, moon_position, type, level)
+		SELECT m.galaxy, m.system, m.position, btype, 0
+		FROM fleet.moons m
+		CROSS JOIN (VALUES ('moon_base'), ('robotics_factory'), ('shipyard'), ('pioneer_lab')) AS t(btype)
+		WHERE NOT EXISTS (
+			SELECT 1 FROM planet.moon_buildings mb
+			WHERE mb.moon_galaxy = m.galaxy
+			  AND mb.moon_system = m.system
+			  AND mb.moon_position = m.position
+			  AND mb.type = t.btype
+		);
+	`); err != nil {
+		slog.Warn("seed moon buildings (fleet.moons may not exist yet)", "error", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.wormhole_generators (
+			id SERIAL PRIMARY KEY,
+			moon_galaxy INT NOT NULL,
+			moon_system INT NOT NULL,
+			moon_position INT NOT NULL,
+			level INT NOT NULL DEFAULT 1,
+			linked_galaxy INT,
+			linked_system INT,
+			linked_position INT,
+			cooldown_until TIMESTAMPTZ,
+			UNIQUE(moon_galaxy, moon_system, moon_position)
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.stargate_links (
+			id SERIAL PRIMARY KEY,
+			planet_id INT NOT NULL REFERENCES planet.planets(id) ON DELETE CASCADE UNIQUE,
+			target_planet_id INT NOT NULL REFERENCES planet.planets(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.gem_slots (
+			id SERIAL PRIMARY KEY,
+			planet_id INT NOT NULL,
+			slot_index INT NOT NULL,
+			gem_type VARCHAR(50),
+			star_level INT NOT NULL DEFAULT 0,
+			UNIQUE(planet_id, slot_index)
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.galactonite_shards (
+			player_id INT NOT NULL,
+			gem_type VARCHAR(50) NOT NULL,
+			count INT NOT NULL DEFAULT 0,
+			combine_attempts INT NOT NULL DEFAULT 0,
+			PRIMARY KEY(player_id, gem_type)
+		);
+	`); err != nil {
+		return err
+	}
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.npc_planets (
+			id SERIAL PRIMARY KEY,
+			planet_id INT NOT NULL UNIQUE,
+			galaxy INT NOT NULL,
+			system INT NOT NULL,
+			position INT NOT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'active',
+			respawns_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		);
 	`); err != nil {
 		return err

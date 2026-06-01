@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS friend.friendships CASCADE;
+
+DROP SCHEMA IF EXISTS friend CASCADE;

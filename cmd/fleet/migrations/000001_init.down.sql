@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS fleet.debris_fields CASCADE;
+
+DROP TABLE IF EXISTS fleet.attack_cooldowns CASCADE;
+
+DROP TABLE IF EXISTS fleet.fleets CASCADE;
+
+DROP SCHEMA IF EXISTS fleet CASCADE;

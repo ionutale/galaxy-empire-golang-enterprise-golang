@@ -172,6 +172,7 @@ func toFleetResponse(f Fleet) FleetResponse {
 		ID: f.ID, PlayerID: f.PlayerID, OriginPlanetID: f.OriginPlanetID,
 		TargetGalaxy: f.TargetGalaxy, TargetSystem: f.TargetSystem, TargetPosition: f.TargetPosition,
 		Mission: f.Mission, Status: f.Status, SpeedPct: f.SpeedPct, Ships: f.Ships,
+		AllianceGroupID: f.AllianceGroupID,
 	}
 }
 

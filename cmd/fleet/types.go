@@ -14,6 +14,8 @@ type Fleet struct {
 	SpeedPct        int
 	Ships           map[string]int
 	ArrivesAt       time.Time
+	CreatedAt       time.Time
+	AllianceGroupID int
 }
 
 type FleetResponse struct {
@@ -28,14 +30,25 @@ type FleetResponse struct {
 	SpeedPct        int            `json:"speed_pct"`
 	Ships           map[string]int `json:"ships"`
 	ArrivesAt       *time.Time     `json:"arrives_at,omitempty"`
+	AllianceGroupID int            `json:"alliance_group_id"`
 }
 
 type DispatchRequest struct {
-	OriginPlanetID int            `json:"origin_planet_id"`
-	Ships          map[string]int `json:"ships"`
-	TargetGalaxy   int            `json:"target_galaxy"`
-	TargetSystem   int            `json:"target_system"`
-	TargetPosition int            `json:"target_position"`
-	Mission        string         `json:"mission"`
-	SpeedPct       int            `json:"speed_pct"`
+	OriginPlanetID  int            `json:"origin_planet_id"`
+	Ships           map[string]int `json:"ships"`
+	TargetGalaxy    int            `json:"target_galaxy"`
+	TargetSystem    int            `json:"target_system"`
+	TargetPosition  int            `json:"target_position"`
+	Mission         string         `json:"mission"`
+	SpeedPct        int            `json:"speed_pct"`
+	AllianceGroupID int            `json:"alliance_group_id"`
+}
+
+type DebrisField struct {
+	ID       int
+	Galaxy   int
+	System   int
+	Position int
+	Metal    int
+	Crystal  int
 }

@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS galaxy.positions CASCADE;
+
+DROP TABLE IF EXISTS galaxy.systems CASCADE;
+
+DROP TABLE IF EXISTS galaxy.galaxies CASCADE;
+
+DROP SCHEMA IF EXISTS galaxy CASCADE;

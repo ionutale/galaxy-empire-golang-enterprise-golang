@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS research.research_queue CASCADE;
+
+DROP SCHEMA IF EXISTS research CASCADE;
