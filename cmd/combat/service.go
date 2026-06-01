@@ -227,8 +227,16 @@ func (s *CombatService) GetMoonInfo(ctx context.Context, galaxy, system, positio
 	return s.repo.GetMoon(ctx, galaxy, system, position)
 }
 
+func mustJSON(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(fmt.Sprintf("combat service: mustJSON failed: %v", err))
+	}
+	return b
+}
+
 func (s *CombatService) fetchDefenderInfo(ctx context.Context, galaxy, system, position int) (planetInfoResponse, error) {
-	body, _ := json.Marshal(map[string]int{
+	body := mustJSON(map[string]int{
 		"galaxy": galaxy, "system": system, "position": position,
 	})
 	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/planet/info", "application/json", bytes.NewReader(body))
@@ -248,7 +256,7 @@ func (s *CombatService) fetchDefenderInfo(ctx context.Context, galaxy, system, p
 }
 
 func (s *CombatService) deductDefenderShips(ctx context.Context, planetID int, ships map[string]int) error {
-	body, _ := json.Marshal(map[string]any{
+	body := mustJSON(map[string]any{
 		"planet_id": planetID,
 		"ships":     ships,
 	})
@@ -264,7 +272,7 @@ func (s *CombatService) deductDefenderShips(ctx context.Context, planetID int, s
 }
 
 func (s *CombatService) addLootToAttacker(ctx context.Context, planetID int, resource string, amount int) error {
-	body, _ := json.Marshal(map[string]any{
+	body := mustJSON(map[string]any{
 		"planet_id": planetID,
 		"resource":  resource,
 		"amount":    amount,
@@ -281,7 +289,7 @@ func (s *CombatService) addLootToAttacker(ctx context.Context, planetID int, res
 }
 
 func (s *CombatService) deductDefenderResources(ctx context.Context, planetID int, resource string, amount int) error {
-	body, _ := json.Marshal(map[string]any{
+	body := mustJSON(map[string]any{
 		"planet_id": planetID,
 		"resource":  resource,
 		"amount":    amount,
@@ -298,7 +306,7 @@ func (s *CombatService) deductDefenderResources(ctx context.Context, planetID in
 }
 
 func (s *CombatService) fetchDefenderDefenses(ctx context.Context, planetID int) (map[string]int, error) {
-	body, _ := json.Marshal(map[string]int{
+	body := mustJSON(map[string]int{
 		"planet_id": planetID,
 	})
 	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/defense/list", "application/json", bytes.NewReader(body))
@@ -320,7 +328,7 @@ func (s *CombatService) fetchDefenderDefenses(ctx context.Context, planetID int)
 }
 
 func (s *CombatService) deductDefenderABMs(ctx context.Context, planetID, count int) error {
-	body, _ := json.Marshal(map[string]any{
+	body := mustJSON(map[string]any{
 		"planet_id": planetID,
 		"count":     count,
 	})
@@ -336,7 +344,7 @@ func (s *CombatService) deductDefenderABMs(ctx context.Context, planetID, count 
 }
 
 func (s *CombatService) deductDefenderDefenses(ctx context.Context, planetID int, losses map[string]int) error {
-	body, _ := json.Marshal(map[string]any{
+	body := mustJSON(map[string]any{
 		"planet_id":      planetID,
 		"defense_losses": losses,
 	})

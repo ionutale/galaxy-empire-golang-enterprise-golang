@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -24,6 +25,7 @@ type Repository interface {
 	UpdateMemberRole(ctx context.Context, allianceID, playerID int, role string) error
 	GetBank(ctx context.Context, allianceID int) (*Bank, error)
 	UpdateBank(ctx context.Context, allianceID int, metal, crystal, gas int) error
+	WithdrawBank(ctx context.Context, allianceID, metal, crystal, gas int) (*Bank, error)
 	AddAuditLog(ctx context.Context, allianceID, playerID int, action string, details map[string]any) error
 	PostBulletin(ctx context.Context, allianceID, authorPlayerID int, title, content string) (Bulletin, error)
 	GetBulletins(ctx context.Context, allianceID int) ([]Bulletin, error)
@@ -201,6 +203,30 @@ func (r *PostgresRepository) UpdateBank(ctx context.Context, allianceID int, met
 		DO UPDATE SET metal = $2, crystal = $3, gas = $4
 	`, allianceID, metal, crystal, gas)
 	return err
+}
+
+// WithdrawBank atomically deducts resources from the alliance bank, checking
+// sufficiency in SQL to prevent the TOCTOU race of concurrent withdrawals.
+func (r *PostgresRepository) WithdrawBank(ctx context.Context, allianceID, metal, crystal, gas int) (*Bank, error) {
+	var b Bank
+	err := r.pool.QueryRow(ctx, `
+		UPDATE alliance.bank
+		SET metal   = metal   - $2,
+		    crystal = crystal - $3,
+		    gas     = gas     - $4
+		WHERE alliance_id = $1
+		  AND metal   >= $2
+		  AND crystal >= $3
+		  AND gas     >= $4
+		RETURNING alliance_id, metal, crystal, gas
+	`, allianceID, metal, crystal, gas).Scan(&b.AllianceID, &b.Metal, &b.Crystal, &b.Gas)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("insufficient resources in bank or bank not found")
+		}
+		return nil, fmt.Errorf("withdraw bank: %w", err)
+	}
+	return &b, nil
 }
 
 func (r *PostgresRepository) AddAuditLog(ctx context.Context, allianceID, playerID int, action string, details map[string]any) error {
@@ -525,6 +551,24 @@ func (m *mockRepo) UpdateBank(ctx context.Context, allianceID int, metal, crysta
 		Gas:        gas,
 	})
 	return nil
+}
+
+func (m *mockRepo) WithdrawBank(ctx context.Context, allianceID, metal, crystal, gas int) (*Bank, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, b := range m.banks {
+		if b.AllianceID == allianceID {
+			if b.Metal < metal || b.Crystal < crystal || b.Gas < gas {
+				return nil, fmt.Errorf("insufficient resources in bank")
+			}
+			m.banks[i].Metal -= metal
+			m.banks[i].Crystal -= crystal
+			m.banks[i].Gas -= gas
+			updated := m.banks[i]
+			return &updated, nil
+		}
+	}
+	return nil, fmt.Errorf("insufficient resources in bank or bank not found")
 }
 
 func (m *mockRepo) AddAuditLog(ctx context.Context, allianceID, playerID int, action string, details map[string]any) error {

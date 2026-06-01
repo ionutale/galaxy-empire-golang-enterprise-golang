@@ -14,16 +14,18 @@ import (
 )
 
 type NebulaService struct {
-	repo          Repository
-	planetBaseURL string
-	httpClient    *http.Client
+	repo            Repository
+	planetBaseURL   string
+	researchBaseURL string
+	httpClient      *http.Client
 }
 
-func NewNebulaService(repo Repository, planetBaseURL string) *NebulaService {
+func NewNebulaService(repo Repository, planetBaseURL string, researchBaseURL string) *NebulaService {
 	return &NebulaService{
-		repo:          repo,
-		planetBaseURL: planetBaseURL,
-		httpClient:    &http.Client{Timeout: 10 * time.Second},
+		repo:            repo,
+		planetBaseURL:   planetBaseURL,
+		researchBaseURL: researchBaseURL,
+		httpClient:      &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -428,11 +430,61 @@ func (s *NebulaService) SpendDarkMatter(ctx context.Context, playerID, amount in
 	return balance, nil
 }
 
-func (s *NebulaService) SpeedUp(ctx context.Context, playerID int, seconds int) (int, int, error) {
+func (s *NebulaService) httpPost(ctx context.Context, url, body string) (string, error) {
+	resp, err := s.httpClient.Post(url, "application/json", bytes.NewBufferString(body))
+	if err != nil {
+		return "", fmt.Errorf("http post %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("non-200 from %s: %s", url, string(b))
+	}
+	return string(b), nil
+}
+
+func (s *NebulaService) speedUpBuilding(ctx context.Context, planetID, seconds int) error {
+	body := fmt.Sprintf(`{"planet_id":%d,"seconds":%d}`, planetID, seconds)
+	_, err := s.httpPost(ctx, s.planetBaseURL+"/internal/build-queue/speed-up", body)
+	return err
+}
+
+func (s *NebulaService) speedUpResearch(ctx context.Context, playerID, seconds int) error {
+	body := fmt.Sprintf(`{"player_id":%d,"seconds":%d}`, playerID, seconds)
+	_, err := s.httpPost(ctx, s.researchBaseURL+"/internal/research/speed-up", body)
+	return err
+}
+
+func (s *NebulaService) SpeedUp(ctx context.Context, playerID int, targetType string, targetID int, seconds int) (int, int, error) {
 	cost := s.CalculateSpeedUpCost(seconds)
+	if cost == 0 {
+		return 0, 0, fmt.Errorf("seconds must be positive")
+	}
 	if _, err := s.SpendDarkMatter(ctx, playerID, cost, "speed_up"); err != nil {
 		return 0, 0, err
 	}
+
+	var applyErr error
+	switch targetType {
+	case "building":
+		applyErr = s.speedUpBuilding(ctx, targetID, seconds)
+	case "research":
+		applyErr = s.speedUpResearch(ctx, playerID, seconds)
+	case "shipyard":
+		applyErr = s.speedUpBuilding(ctx, targetID, seconds)
+	}
+
+	if applyErr != nil {
+		slog.Error("speed-up apply failed, refunding DM", "error", applyErr, "player_id", playerID, "cost", cost)
+		if refundErr := s.repo.AddDarkMatter(ctx, playerID, cost); refundErr != nil {
+			slog.Error("RECONCILIATION NEEDED: speed-up refund failed", "error", refundErr)
+		}
+		return 0, 0, fmt.Errorf("speed-up failed: %w", applyErr)
+	}
+
 	return cost, seconds, nil
 }
 

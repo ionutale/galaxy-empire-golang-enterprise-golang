@@ -620,10 +620,23 @@ func (h *Handler) BuildABM(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetMissileCounts(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	userID, _ := strconv.Atoi(userIDStr)
+	if userID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
 	planetIDStr := chi.URLParam(r, "id")
 	planetID, err := strconv.Atoi(planetIDStr)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid planet id"})
+		return
+	}
+
+	planet, err := h.service.repo.FindByID(r.Context(), planetID)
+	if err != nil || planet.UserID != userID {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
 
@@ -1381,10 +1394,23 @@ func (h *Handler) StarGateUnlink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) StarGateLinks(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	userID, _ := strconv.Atoi(userIDStr)
+	if userID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
 	planetIDStr := chi.URLParam(r, "id")
 	planetID, err := strconv.Atoi(planetIDStr)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid planet id"})
+		return
+	}
+
+	planet, err := h.service.repo.FindByID(r.Context(), planetID)
+	if err != nil || planet.UserID != userID {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
 
@@ -1489,10 +1515,23 @@ func (h *Handler) BuildIronBehemoth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetGems(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	userID, _ := strconv.Atoi(userIDStr)
+	if userID == 0 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
 	planetIDStr := chi.URLParam(r, "id")
 	planetID, err := strconv.Atoi(planetIDStr)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid planet id"})
+		return
+	}
+
+	planet, err := h.service.repo.FindByID(r.Context(), planetID)
+	if err != nil || planet.UserID != userID {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
 
@@ -1783,6 +1822,23 @@ func (h *Handler) InternalCheckNPC(w http.ResponseWriter, r *http.Request) {
 		"status":      npc.Status,
 		"respawns_at": npc.RespawnsAt,
 	})
+}
+
+func (h *Handler) InternalSpeedUpBuild(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PlanetID int `json:"planet_id"`
+		Seconds  int `json:"seconds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request"})
+		return
+	}
+	if err := h.service.repo.SpeedUpBuildQueue(r.Context(), req.PlanetID, req.Seconds); err != nil {
+		slog.Error("speed up build queue", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

@@ -316,6 +316,9 @@ func (s *PlanetService) BuildShips(ctx context.Context, planetID int, shipType s
 	if quantity < 1 {
 		return 0, 0, fmt.Errorf("quantity must be positive")
 	}
+	if quantity > 10_000 {
+		return 0, 0, fmt.Errorf("quantity cannot exceed 10000 per order")
+	}
 
 	shipyardLevel, err := s.repo.GetBuildingLevel(ctx, planetID, "shipyard")
 	if err != nil {

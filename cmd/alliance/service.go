@@ -280,45 +280,28 @@ func (s *AllianceService) BankWithdraw(ctx context.Context, playerID, planetID i
 		return Bank{}, fmt.Errorf("only officers and founders can withdraw from the bank")
 	}
 
-	bank, err := s.repo.GetBank(ctx, member.AllianceID)
+	// Atomic deduction — prevents TOCTOU race between concurrent withdrawals.
+	bank, err := s.repo.WithdrawBank(ctx, member.AllianceID, metal, crystal, gas)
 	if err != nil {
-		return Bank{}, fmt.Errorf("get bank: %w", err)
-	}
-	if bank == nil {
-		return Bank{}, fmt.Errorf("bank not found")
-	}
-
-	if bank.Metal < metal {
-		return Bank{}, fmt.Errorf("insufficient metal in bank: have %d, need %d", bank.Metal, metal)
-	}
-	if bank.Crystal < crystal {
-		return Bank{}, fmt.Errorf("insufficient crystal in bank: have %d, need %d", bank.Crystal, crystal)
-	}
-	if bank.Gas < gas {
-		return Bank{}, fmt.Errorf("insufficient gas in bank: have %d, need %d", bank.Gas, gas)
-	}
-
-	newMetal := bank.Metal - metal
-	newCrystal := bank.Crystal - crystal
-	newGas := bank.Gas - gas
-
-	if err := s.repo.UpdateBank(ctx, member.AllianceID, newMetal, newCrystal, newGas); err != nil {
-		return Bank{}, fmt.Errorf("update bank: %w", err)
+		return Bank{}, fmt.Errorf("withdraw bank: %w", err)
 	}
 
 	if metal > 0 {
 		if err := s.addResource(ctx, planetID, "metal", metal); err != nil {
-			slog.Error("add metal to player failed", "error", err)
+			slog.Error("RECONCILIATION NEEDED: bank debited but planet credit failed",
+				"resource", "metal", "amount", metal, "error", err)
 		}
 	}
 	if crystal > 0 {
 		if err := s.addResource(ctx, planetID, "crystal", crystal); err != nil {
-			slog.Error("add crystal to player failed", "error", err)
+			slog.Error("RECONCILIATION NEEDED: bank debited but planet credit failed",
+				"resource", "crystal", "amount", crystal, "error", err)
 		}
 	}
 	if gas > 0 {
 		if err := s.addResource(ctx, planetID, "gas", gas); err != nil {
-			slog.Error("add gas to player failed", "error", err)
+			slog.Error("RECONCILIATION NEEDED: bank debited but planet credit failed",
+				"resource", "gas", "amount", gas, "error", err)
 		}
 	}
 
@@ -330,7 +313,7 @@ func (s *AllianceService) BankWithdraw(ctx context.Context, playerID, planetID i
 		slog.Error("audit log failed", "error", err)
 	}
 
-	return Bank{AllianceID: member.AllianceID, Metal: newMetal, Crystal: newCrystal, Gas: newGas}, nil
+	return *bank, nil
 }
 
 func (s *AllianceService) GetBank(ctx context.Context, playerID int) (Bank, error) {

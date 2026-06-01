@@ -51,7 +51,7 @@ services:
       <<: *build-go
     environment:
       <<: [*database, *internal-secret]
-      JWT_SECRET: dev-secret-change-in-production
+      JWT_SECRET: dev-secret-change-in-production-xx
       PLANET_SERVICE_ADDR: http://planet:8082
       AUTH_SERVICE_ADDR: http://auth:8081
       FLEET_SERVICE_ADDR: http://fleet:8083
@@ -89,7 +89,7 @@ services:
       <<: *build-go
     environment:
       <<: [*database, *internal-secret]
-      JWT_SECRET: dev-secret-change-in-production
+      JWT_SECRET: dev-secret-change-in-production-xx
     depends_on:
       postgres:
         condition: service_healthy
@@ -218,6 +218,7 @@ services:
     environment:
       <<: *database
       PLANET_SERVICE_URL: http://planet:8082
+      RESEARCH_SERVICE_URL: http://research:8085
     depends_on:
       postgres:
         condition: service_healthy

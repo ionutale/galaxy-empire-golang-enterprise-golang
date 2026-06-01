@@ -94,6 +94,7 @@ func main() {
 		r.Post("/internal/npc/seed-all", h.InternalSeedAllNPC)
 		r.Post("/internal/npc/clear", h.InternalClearNPC)
 		r.Post("/internal/npc/check", h.InternalCheckNPC)
+		r.Post("/internal/build-queue/speed-up", h.InternalSpeedUpBuild)
 	})
 
 	r.Get("/api/planet/mine", h.GetMyPlanet)

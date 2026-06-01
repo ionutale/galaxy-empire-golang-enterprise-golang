@@ -100,6 +100,9 @@ type Repository interface {
 	GetRespawnedNPCPlanets(ctx context.Context) ([]NPCPlanet, error)
 	ClearNPCPlanet(ctx context.Context, planetID int) error
 	RespawnNPCPlanet(ctx context.Context, npcPlanetID int) error
+
+	// Build queue speed-up
+	SpeedUpBuildQueue(ctx context.Context, planetID, seconds int) error
 }
 
 type PostgresRepository struct {
@@ -462,7 +465,7 @@ func (r *PostgresRepository) GetBuildings(ctx context.Context, planetID int) ([]
 		}
 		buildings = append(buildings, b)
 	}
-	return buildings, nil
+	return buildings, rows.Err()
 }
 
 func (r *PostgresRepository) GetBuildingLevel(ctx context.Context, planetID int, buildingType string) (int, error) {
@@ -1410,4 +1413,14 @@ func (r *PostgresRepository) RespawnNPCPlanet(ctx context.Context, npcPlanetID i
 	}
 
 	return tx.Commit(ctx)
+}
+
+func (r *PostgresRepository) SpeedUpBuildQueue(ctx context.Context, planetID, seconds int) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE planet.construction_queue
+		 SET completes_at = GREATEST(NOW(), completes_at - ($2 * INTERVAL '1 second'))
+		 WHERE planet_id = $1 AND completed = FALSE`,
+		planetID, seconds,
+	)
+	return err
 }

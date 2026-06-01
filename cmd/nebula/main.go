@@ -20,6 +20,7 @@ func main() {
 
 	databaseURL := getEnv("DATABASE_URL", "postgres://galaxy:galaxy_dev@localhost:5432/galaxy_empire?sslmode=disable")
 	planetBaseURL := getEnv("PLANET_SERVICE_URL", "http://localhost:8082")
+	researchBaseURL := getEnv("RESEARCH_SERVICE_URL", "http://localhost:8085")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -37,7 +38,7 @@ func main() {
 	}
 
 	repo := NewPostgresRepository(pool)
-	svc := NewNebulaService(repo, planetBaseURL)
+	svc := NewNebulaService(repo, planetBaseURL, researchBaseURL)
 	h := NewHandler(svc)
 
 	r := chi.NewRouter()

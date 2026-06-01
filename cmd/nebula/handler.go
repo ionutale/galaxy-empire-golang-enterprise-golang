@@ -229,7 +229,7 @@ func (h *Handler) DMSpeedUp(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid target type"})
 		return
 	}
-	dmCost, secondsSaved, err := h.service.SpeedUp(r.Context(), userID, req.Seconds)
+	dmCost, secondsSaved, err := h.service.SpeedUp(r.Context(), userID, req.TargetType, req.TargetID, req.Seconds)
 	if err != nil {
 		if err.Error() == "insufficient dark matter" {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "insufficient dark matter"})

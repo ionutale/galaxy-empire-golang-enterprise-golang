@@ -71,6 +71,26 @@ func main() {
 	r.Post("/api/research/{type}/cancel", h.CancelResearch)
 	r.Get("/api/research/queue", h.ListQueue)
 
+	internalSecret := getEnv("INTERNAL_SECRET", "internal-dev-secret")
+	r.Group(func(r chi.Router) {
+		r.Use(internalSecretMiddleware(internalSecret))
+		r.Post("/internal/research/speed-up", func(w http.ResponseWriter, r *http.Request) {
+			var req struct {
+				PlayerID int `json:"player_id"`
+				Seconds  int `json:"seconds"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			if err := repo.SpeedUpResearch(r.Context(), req.PlayerID, req.Seconds); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		})
+	})
+
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
@@ -99,6 +119,18 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 	srv.Shutdown(shutdownCtx)
+}
+
+func internalSecretMiddleware(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Internal-Secret") != secret {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func getEnv(key, fallback string) string {

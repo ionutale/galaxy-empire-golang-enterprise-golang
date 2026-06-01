@@ -19,6 +19,7 @@ type Repository interface {
 	CancelResearchWithRefund(ctx context.Context, id, playerID int, refundMetal, refundCrystal, refundGas int) error
 	CountActiveResearch(ctx context.Context, playerID int) (int, error)
 	TryCompleteResearch(ctx context.Context, id int) (bool, error)
+	SpeedUpResearch(ctx context.Context, playerID, seconds int) error
 }
 
 type PostgresRepository struct {
@@ -154,4 +155,14 @@ func (r *PostgresRepository) TryCompleteResearch(ctx context.Context, id int) (b
 		return false, fmt.Errorf("try complete research: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+func (r *PostgresRepository) SpeedUpResearch(ctx context.Context, playerID, seconds int) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE research.research_queue
+		 SET completes_at = GREATEST(NOW(), completes_at - ($2 * INTERVAL '1 second'))
+		 WHERE player_id = $1 AND completed = FALSE AND cancelled = FALSE`,
+		playerID, seconds,
+	)
+	return err
 }

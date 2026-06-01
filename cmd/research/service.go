@@ -203,11 +203,20 @@ func (s *ResearchService) ProcessCompleted(ctx context.Context) error {
 	}
 
 	for _, q := range completed {
-		if err := s.levelUpTech(ctx, q.PlayerID, q.TechType); err != nil {
-			return fmt.Errorf("level up tech %s for player %d: %w", q.TechType, q.PlayerID, err)
+		// Claim the completion atomically first — this prevents double level-up
+		// if two worker ticks overlap or if this process restarts mid-loop.
+		claimed, err := s.repo.TryCompleteResearch(ctx, q.ID)
+		if err != nil {
+			return fmt.Errorf("try complete research %d: %w", q.ID, err)
 		}
-		if err := s.repo.CompleteResearch(ctx, q.ID); err != nil {
-			return fmt.Errorf("complete research %d: %w", q.ID, err)
+		if !claimed {
+			// Another instance already processed this entry.
+			continue
+		}
+		if err := s.levelUpTech(ctx, q.PlayerID, q.TechType); err != nil {
+			slog.Error("level up tech failed after claiming completion",
+				"tech", q.TechType, "player", q.PlayerID, "research_id", q.ID, "error", err)
+			// Research is marked complete in DB — the tech level will be missing until manual fix.
 		}
 	}
 
@@ -274,11 +283,31 @@ func (s *ResearchService) deductResources(ctx context.Context, planetID, metal, 
 	}
 	if crystal > 0 {
 		if err := s.deductSingle(ctx, planetID, "crystal", crystal); err != nil {
+			// Compensate: refund already-deducted metal
+			if metal > 0 {
+				if refundErr := s.addResource(ctx, planetID, "metal", metal); refundErr != nil {
+					slog.Error("RECONCILIATION NEEDED: metal refund failed after crystal deduct error",
+						"planet_id", planetID, "metal", metal, "error", refundErr)
+				}
+			}
 			return err
 		}
 	}
 	if gas > 0 {
 		if err := s.deductSingle(ctx, planetID, "gas", gas); err != nil {
+			// Compensate: refund already-deducted metal and crystal
+			if metal > 0 {
+				if refundErr := s.addResource(ctx, planetID, "metal", metal); refundErr != nil {
+					slog.Error("RECONCILIATION NEEDED: metal refund failed after gas deduct error",
+						"planet_id", planetID, "metal", metal, "error", refundErr)
+				}
+			}
+			if crystal > 0 {
+				if refundErr := s.addResource(ctx, planetID, "crystal", crystal); refundErr != nil {
+					slog.Error("RECONCILIATION NEEDED: crystal refund failed after gas deduct error",
+						"planet_id", planetID, "crystal", crystal, "error", refundErr)
+				}
+			}
 			return err
 		}
 	}

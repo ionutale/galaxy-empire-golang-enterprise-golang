@@ -35,11 +35,43 @@ func (s *EspionageService) SendProbe(ctx context.Context, playerID int, req Prob
 		return EspionageReport{}, fmt.Errorf("get target info: %w", err)
 	}
 
-	detailLevel := 5
+	techLevel, err := s.getEspionageTechLevel(ctx, playerID)
+	if err != nil {
+		slog.Error("get espionage tech level", "player", playerID, "error", err)
+		techLevel = 0
+	}
+	detailLevel := techLevel
+	if detailLevel > 5 {
+		detailLevel = 5
+	}
 
 	report := s.buildReport(playerID, targetInfo, req, detailLevel)
 
 	return s.repo.CreateReport(ctx, report)
+}
+
+func (s *EspionageService) getEspionageTechLevel(ctx context.Context, playerID int) (int, error) {
+	body, _ := json.Marshal(map[string]any{"player_id": playerID, "tech_type": "espionage_tech"})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.planetBaseURL+"/internal/player/tech-level", bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, nil
+	}
+	var result struct {
+		Level int `json:"level"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, nil
+	}
+	return result.Level, nil
 }
 
 func (s *EspionageService) buildReport(playerID int, target PlanetInfo, req ProbeRequest, detailLevel int) EspionageReport {
