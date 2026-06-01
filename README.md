@@ -208,4 +208,3 @@ cp scripts/screenshots.mjs game/ && (cd game && node screenshots.mjs) && rm game
 
 - This is a learning/portfolio project exploring microservice decomposition in Go — it favours clarity and independent deployability over premature optimisation.
 - Default dev secrets (`JWT_SECRET`, `INTERNAL_SECRET`) live in `docker-compose.yml` and **must** be replaced before any non-local use.
-</content>
