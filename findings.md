@@ -1,4 +1,7 @@
-# Galaxy Empire — Code Review Findings
+# Galaxy Empire — Code Audit Findings (2026-06-01 Full Audit)
+
+> Previous findings (pre-2026-06-01) replaced by this complete re-audit.  
+> PRD: docs/plans/2026-06-01-security-hardening-prd.md
 
 > **Method**: 8 parallel deep-analysis agents covering security, error handling, race conditions, game logic, social services, admin/espionage/radar/research/nebula, frontend, and infrastructure. ~493 unique findings after deduplication.
 
