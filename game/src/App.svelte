@@ -1628,16 +1628,33 @@
           <button class="btn-discoverer-upgrade" on:click={upgradeDiscoverer}>Upgrade</button>
         </div>
 
-        <button class="chat-toggle" on:click={() => { chatView = true; loadChat() }}>Chat</button>
-        <button class="msg-toggle" on:click={() => { messagingView = true; loadInbox(); loadUnreadCount() }}>
-          Messages {unreadCount > 0 ? `(${unreadCount})` : ''}
-        </button>
-        <button class="alliance-toggle" on:click={() => { allianceView = true; loadAlliance() }}>Alliance</button>
-        <button class="buddy-toggle" on:click={() => { buddyView = true; loadBuddyList() }}>Friends</button>
-        <button class="galaxy-toggle" on:click={showGalaxyTab}>Galaxy</button>
-        <button class="shipyard-toggle" on:click={() => { loadShipyard(); loadDefense() }}>Shipyard</button>
-        <button class="fleet-toggle" on:click={loadFleet}>Fleet</button>
-        <button class="moon-toggle" on:click={loadMoonBuildings}>Moon</button>
+        <nav class="primary-nav">
+          <button class="nav-tile galaxy-toggle" on:click={showGalaxyTab}>
+            <span class="nav-icon">🌌</span><span class="nav-label">Galaxy</span>
+          </button>
+          <button class="nav-tile shipyard-toggle" on:click={() => { loadShipyard(); loadDefense() }}>
+            <span class="nav-icon">🛰️</span><span class="nav-label">Shipyard</span>
+          </button>
+          <button class="nav-tile fleet-toggle" on:click={loadFleet}>
+            <span class="nav-icon">🚀</span><span class="nav-label">Fleet</span>
+          </button>
+          <button class="nav-tile moon-toggle" on:click={loadMoonBuildings}>
+            <span class="nav-icon">🌑</span><span class="nav-label">Moon</span>
+          </button>
+          <button class="nav-tile alliance-toggle" on:click={() => { allianceView = true; loadAlliance() }}>
+            <span class="nav-icon">🛡️</span><span class="nav-label">Alliance</span>
+          </button>
+          <button class="nav-tile buddy-toggle" on:click={() => { buddyView = true; loadBuddyList() }}>
+            <span class="nav-icon">🤝</span><span class="nav-label">Friends</span>
+          </button>
+          <button class="nav-tile chat-toggle" on:click={() => { chatView = true; loadChat() }}>
+            <span class="nav-icon">💬</span><span class="nav-label">Chat</span>
+          </button>
+          <button class="nav-tile msg-toggle" on:click={() => { messagingView = true; loadInbox(); loadUnreadCount() }}>
+            <span class="nav-icon">✉️</span><span class="nav-label">Mail</span>
+            {#if unreadCount > 0}<span class="nav-badge">{unreadCount}</span>{/if}
+          </button>
+        </nav>
 
         <div class="resources">
           <div class="res metal">
@@ -3051,4 +3068,251 @@
   .btn-discoverer-upgrade:hover { background: #3a5a4a; }
 
   .npc-badge { font-size: 0.6rem; padding: 0.05rem 0.25rem; background: #4a2a2a; border-radius: 3px; color: #d47474; margin-left: 0.2rem; }
+
+  /* ============================================================
+     ORBITAL COMMAND — HUD redesign (overrides above)
+     A holographic starship-console theme: deep-space field,
+     cyan holo-glass panels, amber energy accents.
+     ============================================================ */
+  :root {
+    --bg-void: #070b16;
+    --holo: #3ee0c8;          /* primary cyan accent */
+    --holo-dim: #1d7d72;
+    --amber: #ffb454;         /* energy / resources */
+    --violet: #9d8cff;
+    --danger: #ff5c6c;
+    --ink: #d7e3f4;           /* body text */
+    --ink-soft: #7e90b0;      /* muted text */
+    --panel: rgba(16, 26, 46, 0.72);
+    --panel-solid: #0d1526;
+    --line: rgba(62, 224, 200, 0.22);
+    --line-soft: rgba(126, 144, 176, 0.16);
+    --radius: 14px;
+    --font-display: 'Chakra Petch', ui-monospace, monospace;
+    --font-ui: 'Rajdhani', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  :global(body) {
+    font-family: var(--font-ui);
+    color: var(--ink);
+    background:
+      radial-gradient(1.5px 1.5px at 12% 18%, rgba(255,255,255,0.55), transparent),
+      radial-gradient(1.5px 1.5px at 78% 32%, rgba(255,255,255,0.45), transparent),
+      radial-gradient(1px 1px at 42% 72%, rgba(255,255,255,0.40), transparent),
+      radial-gradient(1px 1px at 88% 84%, rgba(255,255,255,0.35), transparent),
+      radial-gradient(1.5px 1.5px at 60% 12%, rgba(255,255,255,0.40), transparent),
+      radial-gradient(900px 560px at 50% -12%, rgba(62,224,200,0.12), transparent),
+      radial-gradient(680px 460px at 92% 112%, rgba(157,140,255,0.12), transparent),
+      var(--bg-void);
+    background-attachment: fixed;
+    letter-spacing: 0.01em;
+  }
+
+  .app { max-width: 460px; }
+
+  /* ---- Login ---- */
+  .auth {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 0 0 1px rgba(62,224,200,0.05), 0 24px 60px -20px rgba(0,0,0,0.8),
+      inset 0 1px 0 rgba(255,255,255,0.04);
+    padding: 2.4rem 2rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .auth::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(420px 180px at 50% -20%, rgba(62,224,200,0.18), transparent);
+    pointer-events: none;
+  }
+  .auth h1 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 1.9rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #eafdf9;
+    text-shadow: 0 0 18px rgba(62,224,200,0.55);
+    margin-bottom: 1.6rem;
+  }
+  input {
+    background: rgba(7, 12, 24, 0.7);
+    border: 1px solid var(--line-soft);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    font-size: 0.95rem;
+    border-radius: 8px;
+  }
+  input:focus { border-color: var(--holo); box-shadow: 0 0 0 3px rgba(62,224,200,0.15); }
+  input::placeholder { color: #43577a; }
+  button[type="submit"] {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, var(--holo), var(--holo-dim));
+    color: #03130f;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px -8px rgba(62,224,200,0.6);
+  }
+  button[type="submit"]:hover { filter: brightness(1.08); background: linear-gradient(135deg, var(--holo), var(--holo-dim)); }
+  .switch { color: var(--holo); letter-spacing: 0.04em; }
+  .switch:hover { color: #8af3e6; }
+
+  /* ---- Dashboard shell ---- */
+  .dashboard {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 24px 60px -24px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.04);
+    padding: 1.4rem 1.4rem 2rem;
+  }
+  header { border-bottom: 1px solid var(--line-soft); padding-bottom: 0.85rem; }
+  .user-email { color: var(--ink-soft); font-size: 0.72rem; letter-spacing: 0.02em; }
+  .header-actions button:not(.logout):not(.admin-toggle) {
+    font-size: 1.05rem;
+    border-radius: 9px;
+    transition: transform 0.15s, background 0.15s;
+  }
+  .header-actions button:not(.logout):not(.admin-toggle):hover { transform: translateY(-2px); }
+  .logout {
+    font-family: var(--font-display); letter-spacing: 0.08em; text-transform: uppercase;
+    background: rgba(255,92,108,0.08); border: 1px solid rgba(255,92,108,0.3); color: var(--danger);
+    border-radius: 7px;
+  }
+  .logout:hover { background: rgba(255,92,108,0.18); }
+
+  /* ---- Planet header ---- */
+  .name {
+    font-family: var(--font-display); font-weight: 700; letter-spacing: 0.04em;
+    color: #eafdf9; text-shadow: 0 0 16px rgba(62,224,200,0.35); cursor: pointer;
+  }
+  .coords {
+    font-family: var(--font-display); color: var(--holo); letter-spacing: 0.22em;
+    font-size: 0.78rem; opacity: 0.85;
+  }
+  .type-badge { border-radius: 999px; font-family: var(--font-ui); font-weight: 600; }
+  .temperature { font-family: var(--font-display); color: var(--ink-soft); }
+  .fields { color: var(--ink-soft); letter-spacing: 0.04em; }
+
+  .player-stats { gap: 0.4rem; flex-wrap: wrap; }
+  .vip-badge, .rank-badge, .credits-badge, .discoverer-badge {
+    font-family: var(--font-display); font-weight: 500; font-size: 0.72rem;
+    border-radius: 999px; padding: 0.2rem 0.6rem; letter-spacing: 0.04em;
+    background: rgba(7,12,24,0.6); border: 1px solid var(--line-soft); color: var(--ink);
+  }
+  .vip-badge { border-color: rgba(157,140,255,0.45); color: var(--violet); }
+  .credits-badge { border-color: rgba(255,180,84,0.4); color: var(--amber); }
+  .discoverer-badge { border-color: var(--line); color: var(--holo); background: rgba(7,12,24,0.6); }
+  .btn-discoverer-upgrade {
+    font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.06em;
+    background: rgba(62,224,200,0.14); border: 1px solid var(--line); color: var(--holo); border-radius: 999px;
+  }
+  .btn-discoverer-upgrade:hover { background: rgba(62,224,200,0.24); }
+
+  /* ---- Primary navigation: holographic tile grid ---- */
+  .primary-nav {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.55rem;
+    margin: 1.25rem 0 1.5rem;
+  }
+  .primary-nav .nav-tile {
+    position: relative;
+    display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
+    padding: 0.7rem 0.25rem 0.55rem;
+    background: linear-gradient(180deg, rgba(62,224,200,0.06), rgba(7,12,24,0.5));
+    border: 1px solid var(--line-soft);
+    border-radius: 12px;
+    color: var(--ink);
+    cursor: pointer;
+    font-family: var(--font-display);
+    transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+    width: auto; margin: 0;
+  }
+  .primary-nav .nav-tile:hover {
+    transform: translateY(-3px);
+    border-color: var(--holo);
+    background: linear-gradient(180deg, rgba(62,224,200,0.16), rgba(7,12,24,0.5));
+    box-shadow: 0 10px 22px -12px rgba(62,224,200,0.7), inset 0 0 0 1px rgba(62,224,200,0.15);
+  }
+  .primary-nav .nav-tile:active { transform: translateY(-1px); }
+  .nav-icon { font-size: 1.35rem; line-height: 1; filter: drop-shadow(0 0 6px rgba(62,224,200,0.35)); }
+  .nav-label {
+    font-size: 0.66rem; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .primary-nav .nav-tile:hover .nav-label { color: var(--holo); }
+  .nav-badge {
+    position: absolute; top: -6px; right: -6px;
+    min-width: 18px; height: 18px; padding: 0 5px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--danger); color: #fff; font-family: var(--font-display);
+    font-size: 0.62rem; font-weight: 700; border-radius: 999px;
+    box-shadow: 0 0 10px rgba(255,92,108,0.7);
+  }
+
+  /* ---- Resource HUD ---- */
+  .resources { gap: 0.6rem; }
+  .res {
+    position: relative;
+    background: rgba(7,12,24,0.6);
+    border: 1px solid var(--line-soft);
+    border-radius: 12px;
+    padding: 0.7rem 0.8rem 0.7rem 1rem;
+    overflow: hidden;
+  }
+  .res::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--holo); box-shadow: 0 0 12px var(--holo);
+  }
+  .res.metal::before { background: #9fb3c8; box-shadow: 0 0 12px #9fb3c8; }
+  .res.crystal::before { background: var(--holo); box-shadow: 0 0 12px var(--holo); }
+  .res.gas::before { background: var(--violet); box-shadow: 0 0 12px var(--violet); }
+  .res.energy::before { background: var(--amber); box-shadow: 0 0 12px var(--amber); }
+  .label { color: var(--ink-soft); font-family: var(--font-display); letter-spacing: 0.12em; }
+  .val { font-family: var(--font-display); font-weight: 700; color: #eafdf9; }
+  .rate { color: var(--holo); font-family: var(--font-display); }
+
+  /* ---- Section headings ---- */
+  .buildings h2, .galaxy-section h3, .shipyard-section h3, .fleet-section h3,
+  .store-section h3, .admin-section h3 {
+    font-family: var(--font-display); letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--holo); text-shadow: 0 0 12px rgba(62,224,200,0.25);
+  }
+  .building {
+    background: rgba(7,12,24,0.5); border: 1px solid var(--line-soft); border-radius: 10px;
+  }
+
+  /* ---- Unified buttons ---- */
+  .btn-confirm, .btn-store-buy, .btn-admin {
+    font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.08em;
+    background: linear-gradient(135deg, var(--holo), var(--holo-dim)); color: #03130f;
+    border: none; border-radius: 8px;
+  }
+  .btn-confirm:hover:not(:disabled), .btn-store-buy:hover, .btn-admin:hover { filter: brightness(1.08); }
+  .back-btn {
+    font-family: var(--font-display); letter-spacing: 0.06em;
+    background: rgba(7,12,24,0.6); border: 1px solid var(--line-soft); color: var(--ink-soft);
+    border-radius: 8px;
+  }
+  .back-btn:hover { border-color: var(--holo); color: var(--holo); }
+
+  /* ---- Unified modal / overlay surfaces ---- */
+  .tutorial-overlay, .daily-gift-popup {
+    background: rgba(4, 8, 18, 0.74); backdrop-filter: blur(6px);
+  }
+  .tutorial-card, .daily-gift-content, .notif-panel, .store-section, .admin-section {
+    background: var(--panel-solid);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 24px 60px -20px rgba(0,0,0,0.85), inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+  .tutorial-card h3, .daily-gift-content h3 {
+    font-family: var(--font-display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--holo);
+  }
 </style>
