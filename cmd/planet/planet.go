@@ -55,6 +55,7 @@ var ErrInvalidGemType = errors.New("invalid gem type")
 var ErrInsufficientShards = errors.New("insufficient shards")
 var ErrCombineFailed = errors.New("gem combine failed")
 var ErrNPCPlanetNotFound = errors.New("NPC planet not found")
+var ErrForbidden = errors.New("forbidden")
 
 type PlanetService struct {
 	repo Repository
@@ -1035,7 +1036,7 @@ func (s *PlanetService) GetMoonBuildings(ctx context.Context, galaxy, system, po
 	return buildings, maxFields, nil
 }
 
-func (s *PlanetService) StartMoonBuildingUpgrade(ctx context.Context, galaxy, system, position int, buildingType string) error {
+func (s *PlanetService) StartMoonBuildingUpgrade(ctx context.Context, userID, galaxy, system, position int, buildingType string) error {
 	moonExists, err := s.repo.MoonExists(ctx, galaxy, system, position)
 	if err != nil {
 		return err
@@ -1114,6 +1115,10 @@ func (s *PlanetService) StartMoonBuildingUpgrade(ctx context.Context, galaxy, sy
 		return err
 	}
 
+	if planet.UserID != userID {
+		return ErrForbidden
+	}
+
 	metalCost, crystalCost, gasCost := moonBuildingCostResources(buildingType, currentLevel)
 	if planet.Metal < metalCost || planet.Crystal < crystalCost || planet.Gas < gasCost {
 		return ErrInsufficientResources
@@ -1179,7 +1184,13 @@ func (s *PlanetService) BuildIronBehemoth(ctx context.Context, galaxy, system, p
 	return quantity, buildTime, nil
 }
 
-func (s *PlanetService) LinkWormholes(ctx context.Context, srcGalaxy, srcSystem, srcPos, dstGalaxy, dstSystem, dstPos int) error {
+func (s *PlanetService) LinkWormholes(ctx context.Context, userID, srcGalaxy, srcSystem, srcPos, dstGalaxy, dstSystem, dstPos int) error {
+	// Verify the source moon belongs to the calling player
+	srcPlanet, err := s.repo.FindByCoords(ctx, srcGalaxy, srcSystem, srcPos)
+	if err != nil || srcPlanet.UserID != userID {
+		return fmt.Errorf("unauthorized: source moon not owned by player")
+	}
+
 	srcWormhole, err := s.repo.GetWormhole(ctx, srcGalaxy, srcSystem, srcPos)
 	if err != nil {
 		return ErrWormholeNotFound

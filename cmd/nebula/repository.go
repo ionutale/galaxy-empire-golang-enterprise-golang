@@ -14,6 +14,7 @@ type Repository interface {
 	CreateExpedition(ctx context.Context, e Expedition) (Expedition, error)
 	GetExpedition(ctx context.Context, expeditionID, playerID int) (Expedition, error)
 	ListPlayerExpeditions(ctx context.Context, playerID int) ([]Expedition, error)
+	GetLastExpeditionTime(ctx context.Context, playerID int) (time.Time, error)
 	UpdateExpeditionOutcome(ctx context.Context, expeditionID int, outcome string, resourcesFound, shipsFound, shipsLost map[string]int, darkMatter int) error
 	GetDarkMatterBalance(ctx context.Context, playerID int) (balance, totalEarned int, err error)
 	AddDarkMatter(ctx context.Context, playerID, amount int) error
@@ -151,6 +152,20 @@ func (r *PostgresRepository) ListPlayerExpeditions(ctx context.Context, playerID
 		expeditions = append(expeditions, e)
 	}
 	return expeditions, rows.Err()
+}
+
+func (r *PostgresRepository) GetLastExpeditionTime(ctx context.Context, playerID int) (time.Time, error) {
+	var t time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT created_at FROM nebula.expeditions
+		WHERE player_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, playerID).Scan(&t)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("get last expedition time: %w", err)
+	}
+	return t, nil
 }
 
 func (r *PostgresRepository) UpdateExpeditionOutcome(ctx context.Context, expeditionID int, outcome string, resourcesFound, shipsFound, shipsLost map[string]int, darkMatter int) error {
@@ -416,6 +431,7 @@ func (r *PostgresRepository) GetDailyGiftStatus(ctx context.Context, playerID in
 
 func (r *PostgresRepository) ClaimDailyGift(ctx context.Context, playerID int) (int, int, error) {
 	var newStreakDay, consecutiveDays int
+	var alreadyClaimed bool
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO nebula.daily_gift_streak (player_id, streak_day, consecutive_days, last_claim_date)
 		VALUES ($1, 1, 1, CURRENT_DATE)
@@ -430,11 +446,48 @@ func (r *PostgresRepository) ClaimDailyGift(ctx context.Context, playerID int) (
 			WHEN nebula.daily_gift_streak.last_claim_date = CURRENT_DATE - 1 THEN nebula.daily_gift_streak.consecutive_days + 1
 			ELSE 1
 		END),
-		last_claim_date = CURRENT_DATE
-		RETURNING streak_day, consecutive_days
-	`, playerID).Scan(&newStreakDay, &consecutiveDays)
+		last_claim_date = CASE
+			WHEN nebula.daily_gift_streak.last_claim_date = CURRENT_DATE THEN nebula.daily_gift_streak.last_claim_date
+			ELSE CURRENT_DATE
+		END
+		RETURNING streak_day, consecutive_days,
+		          (xmax <> 0 AND last_claim_date = CURRENT_DATE AND streak_day = (
+		              CASE
+		                WHEN last_claim_date = CURRENT_DATE THEN streak_day
+		                ELSE streak_day
+		              END
+		          )) OR (xmax = 0) AS was_insert,
+		          last_claim_date = CURRENT_DATE AND xmax <> 0 AND
+		              (streak_day = (SELECT streak_day FROM nebula.daily_gift_streak WHERE player_id = $1)) AS already_claimed
+	`, playerID).Scan(&newStreakDay, &consecutiveDays, new(bool), &alreadyClaimed)
 	if err != nil {
-		return 0, 0, fmt.Errorf("claim daily gift: %w", err)
+		// Fallback: simple scan without the complex already_claimed detection
+		err2 := r.pool.QueryRow(ctx, `
+			SELECT streak_day, consecutive_days, last_claim_date = CURRENT_DATE AND xmax <> 0
+			FROM (
+				INSERT INTO nebula.daily_gift_streak (player_id, streak_day, consecutive_days, last_claim_date)
+				VALUES ($1, 1, 1, CURRENT_DATE)
+				ON CONFLICT (player_id) DO UPDATE
+				SET streak_day = (CASE
+					WHEN nebula.daily_gift_streak.last_claim_date = CURRENT_DATE THEN nebula.daily_gift_streak.streak_day
+					WHEN nebula.daily_gift_streak.last_claim_date = CURRENT_DATE - 1 THEN nebula.daily_gift_streak.streak_day + 1
+					ELSE 1
+				END),
+				consecutive_days = (CASE
+					WHEN nebula.daily_gift_streak.last_claim_date = CURRENT_DATE THEN nebula.daily_gift_streak.consecutive_days
+					WHEN nebula.daily_gift_streak.last_claim_date = CURRENT_DATE - 1 THEN nebula.daily_gift_streak.consecutive_days + 1
+					ELSE 1
+				END),
+				last_claim_date = CURRENT_DATE
+				RETURNING streak_day, consecutive_days, xmax
+			) sub
+		`, playerID).Scan(&newStreakDay, &consecutiveDays, &alreadyClaimed)
+		if err2 != nil {
+			return 0, 0, fmt.Errorf("claim daily gift: %w", err2)
+		}
+	}
+	if alreadyClaimed {
+		return 0, 0, fmt.Errorf("already claimed today")
 	}
 	if newStreakDay > 7 {
 		newStreakDay = 1
@@ -720,6 +773,23 @@ func (m *mockRepo) ListPlayerExpeditions(ctx context.Context, playerID int) ([]E
 		}
 	}
 	return result, nil
+}
+
+func (m *mockRepo) GetLastExpeditionTime(ctx context.Context, playerID int) (time.Time, error) {
+	var last time.Time
+	found := false
+	for _, e := range m.expeditions {
+		if e.PlayerID == playerID {
+			if !found || e.StartedAt.After(last) {
+				last = e.StartedAt
+				found = true
+			}
+		}
+	}
+	if !found {
+		return time.Time{}, fmt.Errorf("no expeditions found")
+	}
+	return last, nil
 }
 
 func (m *mockRepo) UpdateExpeditionOutcome(ctx context.Context, expeditionID int, outcome string, resourcesFound, shipsFound, shipsLost map[string]int, darkMatter int) error {

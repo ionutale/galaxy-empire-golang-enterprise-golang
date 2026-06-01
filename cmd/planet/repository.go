@@ -72,6 +72,10 @@ type Repository interface {
 	DeductIPMs(ctx context.Context, planetID, count int) error
 	DeductABMs(ctx context.Context, planetID, count int) error
 
+	// Atomic resource operations
+	AtomicDeductResource(ctx context.Context, planetID int, resource string, amount int) error
+	AtomicAddResource(ctx context.Context, planetID int, resource string, amount int) error
+
 	// Star Gate
 	StarGateLink(ctx context.Context, planetID, targetPlanetID int) error
 	StarGateUnlink(ctx context.Context, planetID int) error
@@ -383,6 +387,43 @@ func (r *PostgresRepository) UpdateResources(ctx context.Context, planetID, meta
 		metal, crystal, gas, updatedAt, planetID,
 	)
 	return err
+}
+
+func (r *PostgresRepository) AtomicDeductResource(ctx context.Context, planetID int, resource string, amount int) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE planet.planets
+		 SET metal   = CASE WHEN $2 = 'metal'   THEN metal   - $3 ELSE metal   END,
+		     crystal = CASE WHEN $2 = 'crystal' THEN crystal - $3 ELSE crystal END,
+		     gas     = CASE WHEN $2 = 'gas'     THEN gas     - $3 ELSE gas     END
+		 WHERE id = $1
+		   AND CASE WHEN $2 = 'metal'   THEN metal   >= $3
+		            WHEN $2 = 'crystal' THEN crystal >= $3
+		            WHEN $2 = 'gas'     THEN gas     >= $3
+		            ELSE TRUE END`,
+		planetID, resource, amount,
+	)
+	if err != nil {
+		return fmt.Errorf("atomic deduct resource: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrInsufficientResources
+	}
+	return nil
+}
+
+func (r *PostgresRepository) AtomicAddResource(ctx context.Context, planetID int, resource string, amount int) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE planet.planets
+		 SET metal   = CASE WHEN $2 = 'metal'   THEN metal   + $3 ELSE metal   END,
+		     crystal = CASE WHEN $2 = 'crystal' THEN crystal + $3 ELSE crystal END,
+		     gas     = CASE WHEN $2 = 'gas'     THEN gas     + $3 ELSE gas     END
+		 WHERE id = $1`,
+		planetID, resource, amount,
+	)
+	if err != nil {
+		return fmt.Errorf("atomic add resource: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) UpdatePlanetName(ctx context.Context, planetID int, name string) error {

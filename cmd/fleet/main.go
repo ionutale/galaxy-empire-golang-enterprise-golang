@@ -161,6 +161,9 @@ func main() {
 								} else {
 									slog.Info("combat resolved for fleet", "fleet", f.ID)
 								}
+								if err := repo.MarkFleetArrived(fleetCtx, f.ID); err != nil {
+									slog.Error("mark attack fleet arrived", "fleet", f.ID, "error", err)
+								}
 							case "acs_attack":
 								if f.AllianceGroupID == 0 {
 									slog.Error("acs_attack fleet has no alliance group", "fleet", f.ID)

@@ -12,12 +12,11 @@ services:
   postgres:
     image: postgres:16-alpine
     mem_limit: 300m
+    restart: unless-stopped
     environment:
       POSTGRES_USER: galaxy
       POSTGRES_PASSWORD: galaxy_dev
       POSTGRES_DB: galaxy_empire
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -25,10 +24,13 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - galaxy_net
 
   # ── Frontend ──────────────────────────────────────────
   nginx:
     mem_limit: 100m
+    restart: unless-stopped
     build:
       context: ./game
       dockerfile: Dockerfile
@@ -36,15 +38,17 @@ services:
       - "80:80"
     depends_on:
       - gateway
+    networks:
+      - galaxy_net
 
   # ── Microservices ─────────────────────────────────────
   gateway:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/gateway
       <<: *build-go
-    ports:
-      - "8080:8080"
     environment:
       <<: [*database, *internal-secret]
       JWT_SECRET: dev-secret-change-in-production
@@ -67,9 +71,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - galaxy_net
 
   auth:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/auth
       <<: *build-go
@@ -79,9 +93,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - galaxy_net
 
   planet:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/planet
       <<: *build-go
@@ -90,9 +114,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - galaxy_net
 
   fleet:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/fleet
       <<: *build-go
@@ -104,9 +138,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - galaxy_net
 
   combat:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/combat
       <<: *build-go
@@ -116,9 +160,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   research:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/research
       <<: *build-go
@@ -127,9 +175,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   espionage:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/espionage
       <<: *build-go
@@ -138,9 +190,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   alliance:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/alliance
       <<: *build-go
@@ -149,9 +205,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   nebula:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/nebula
       <<: *build-go
@@ -161,9 +221,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   radar:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/radar
       <<: *build-go
@@ -172,9 +236,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   chat:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/chat
       <<: *build-go
@@ -183,9 +251,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   friend:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/friend
       <<: *build-go
@@ -194,9 +266,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   ranking:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/ranking
       <<: *build-go
@@ -205,9 +281,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   notification:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/notification
       <<: *build-go
@@ -216,9 +296,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   quest:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/quest
       <<: *build-go
@@ -227,9 +311,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   event:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/event
       <<: *build-go
@@ -238,9 +326,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   admin:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/admin
       <<: *build-go
@@ -249,9 +341,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
   tutorial:
     mem_limit: 100m
+    cpus: "0.5"
+    restart: unless-stopped
     build:
       context: ./cmd/tutorial
       <<: *build-go
@@ -260,6 +356,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - galaxy_net
 
 volumes:
   pgdata:
+
+networks:
+  galaxy_net:
+    driver: bridge

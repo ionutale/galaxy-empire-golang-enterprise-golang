@@ -43,6 +43,16 @@ func (s *NebulaService) StartExpedition(ctx context.Context, playerID, planetID 
 		return Expedition{}, fmt.Errorf("planet service: %w", err)
 	}
 
+	if planetInfo.PlayerID != playerID {
+		return Expedition{}, fmt.Errorf("planet does not belong to player")
+	}
+
+	// Check expedition cooldown
+	lastExpedition, err := s.repo.GetLastExpeditionTime(ctx, playerID)
+	if err == nil && time.Since(lastExpedition) < 60*time.Second {
+		return Expedition{}, fmt.Errorf("expedition cooldown: please wait before starting another")
+	}
+
 	for shipType, qty := range ships {
 		if planetInfo.Ships[shipType] < qty {
 			return Expedition{}, fmt.Errorf("insufficient %s: have %d, need %d", shipType, planetInfo.Ships[shipType], qty)
@@ -452,7 +462,11 @@ func (s *NebulaService) HireCommander(ctx context.Context, playerID int, command
 	}
 	entry, err := s.repo.HireCommander(ctx, playerID, commanderType, 1, expiresAt)
 	if err != nil {
-		return CommanderEntry{}, err
+		// Refund the DM since the hire failed
+		if refundErr := s.repo.AddDarkMatter(ctx, playerID, config.DMCost); refundErr != nil {
+			slog.Error("failed to refund DM for commander hire failure", "error", refundErr)
+		}
+		return CommanderEntry{}, fmt.Errorf("hire commander: %w", err)
 	}
 	entry.Name = config.Name
 	entry.Description = config.Description

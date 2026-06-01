@@ -115,10 +115,8 @@ func (s *FleetService) DispatchFleet(ctx context.Context, playerID int, req Disp
 		}
 	}
 
-	if req.AllianceGroupID == 0 {
-		if err := s.CheckFleetSlotLimit(ctx, playerID); err != nil {
-			return Fleet{}, err
-		}
+	if err := s.CheckFleetSlotLimit(ctx, playerID); err != nil {
+		return Fleet{}, err
 	}
 
 	if req.Mission == "attack" || req.Mission == "acs_attack" {
@@ -130,6 +128,27 @@ func (s *FleetService) DispatchFleet(ctx context.Context, playerID int, req Disp
 			inVacation, vErr := s.checkTargetVacationMode(ctx, targetPlayerID)
 			if vErr == nil && inVacation {
 				return Fleet{}, fmt.Errorf("target player is in vacation mode")
+			}
+		}
+	}
+
+	if req.Mission == "transport" {
+		if req.CargoMetal < 0 || req.CargoCrystal < 0 || req.CargoGas < 0 {
+			return Fleet{}, fmt.Errorf("cargo amounts cannot be negative")
+		}
+		if req.CargoMetal > 0 {
+			if err := s.deductResource(ctx, req.OriginPlanetID, "metal", req.CargoMetal); err != nil {
+				return Fleet{}, fmt.Errorf("cargo metal deduction: %w", err)
+			}
+		}
+		if req.CargoCrystal > 0 {
+			if err := s.deductResource(ctx, req.OriginPlanetID, "crystal", req.CargoCrystal); err != nil {
+				return Fleet{}, fmt.Errorf("cargo crystal deduction: %w", err)
+			}
+		}
+		if req.CargoGas > 0 {
+			if err := s.deductResource(ctx, req.OriginPlanetID, "gas", req.CargoGas); err != nil {
+				return Fleet{}, fmt.Errorf("cargo gas deduction: %w", err)
 			}
 		}
 	}
@@ -147,6 +166,9 @@ func (s *FleetService) DispatchFleet(ctx context.Context, playerID int, req Disp
 		Ships:           req.Ships,
 		ArrivesAt:       now.Add(travelDuration),
 		AllianceGroupID: req.AllianceGroupID,
+		CargoMetal:      req.CargoMetal,
+		CargoCrystal:    req.CargoCrystal,
+		CargoGas:        req.CargoGas,
 	}
 
 	return s.repo.CreateFleet(ctx, fleet)
@@ -198,7 +220,10 @@ func (s *FleetService) SplitFleet(ctx context.Context, playerID, fleetID int, sh
 	}
 
 	for shipType, qty := range ships {
-		if qty <= 0 {
+		if qty < 0 {
+			return Fleet{}, fmt.Errorf("split quantity cannot be negative")
+		}
+		if qty == 0 {
 			continue
 		}
 		if fleet.Ships[shipType] < qty {
@@ -208,6 +233,14 @@ func (s *FleetService) SplitFleet(ctx context.Context, playerID, fleetID int, sh
 		if fleet.Ships[shipType] == 0 {
 			delete(fleet.Ships, shipType)
 		}
+	}
+
+	totalRemaining := 0
+	for _, q := range fleet.Ships {
+		totalRemaining += q
+	}
+	if totalRemaining == 0 {
+		return Fleet{}, fmt.Errorf("cannot split: source fleet would be empty")
 	}
 
 	if err := s.repo.UpdateFleetShips(ctx, fleetID, fleet.Ships); err != nil {
@@ -413,7 +446,32 @@ func (s *FleetService) deductFuel(ctx context.Context, planetID, amount int) err
 	if err != nil {
 		return fmt.Errorf("planet service unreachable: %w", err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("fuel deduction failed (status %d): %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+func (s *FleetService) deductResource(ctx context.Context, planetID int, resource string, amount int) error {
+	if amount <= 0 {
+		return nil
+	}
+	body, _ := json.Marshal(map[string]any{
+		"planet_id": planetID,
+		"resource":  resource,
+		"amount":    amount,
+	})
+	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/resources/deduct", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("planet service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("resource deduction failed (status %d): %s", resp.StatusCode, string(b))
+	}
 	return nil
 }
 

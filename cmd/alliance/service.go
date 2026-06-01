@@ -107,9 +107,9 @@ func (s *AllianceService) ApplyToAlliance(ctx context.Context, playerID, allianc
 		return Member{}, fmt.Errorf("you are already in an alliance")
 	}
 
-	member, err := s.repo.AddMember(ctx, alliance.ID, playerID, "member")
+	member, err := s.repo.AddMember(ctx, alliance.ID, playerID, "pending")
 	if err != nil {
-		return Member{}, fmt.Errorf("join alliance: %w", err)
+		return Member{}, fmt.Errorf("apply to alliance: %w", err)
 	}
 
 	if err := s.repo.AddAuditLog(ctx, alliance.ID, playerID, "member_joined", nil); err != nil {

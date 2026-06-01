@@ -101,3 +101,27 @@ func (m *mockRepo) CancelResearchWithRefund(_ context.Context, id, playerID int,
 	}
 	return nil
 }
+
+func (m *mockRepo) CountActiveResearch(_ context.Context, playerID int) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, q := range m.queue {
+		if q.PlayerID == playerID && !q.Completed && !q.Cancelled {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *mockRepo) TryCompleteResearch(_ context.Context, id int) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, q := range m.queue {
+		if q.ID == id && !q.Completed {
+			m.queue[i].Completed = true
+			return true, nil
+		}
+	}
+	return false, nil
+}

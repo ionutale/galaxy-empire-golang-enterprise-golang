@@ -760,38 +760,19 @@ func (h *Handler) InternalDeductResource(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	planet, err := h.service.repo.FindByID(r.Context(), req.PlanetID)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "planet not found"})
-		return
-	}
-
 	switch req.Resource {
-	case "metal":
-		if planet.Metal < req.Amount {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "insufficient metal"})
-			return
-		}
-		planet.Metal -= req.Amount
-	case "crystal":
-		if planet.Crystal < req.Amount {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "insufficient crystal"})
-			return
-		}
-		planet.Crystal -= req.Amount
-	case "gas":
-		if planet.Gas < req.Amount {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "insufficient gas"})
-			return
-		}
-		planet.Gas -= req.Amount
+	case "metal", "crystal", "gas":
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid resource"})
 		return
 	}
 
-	if err := h.service.repo.UpdateResources(r.Context(), req.PlanetID, planet.Metal, planet.Crystal, planet.Gas, time.Now()); err != nil {
-		slog.Error("update resources failed", "error", err)
+	if err := h.service.repo.AtomicDeductResource(r.Context(), req.PlanetID, req.Resource, req.Amount); err != nil {
+		if errors.Is(err, ErrInsufficientResources) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "insufficient " + req.Resource})
+			return
+		}
+		slog.Error("atomic deduct resource failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
@@ -874,26 +855,15 @@ func (h *Handler) InternalAddResource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	planet, err := h.service.repo.FindByID(r.Context(), req.PlanetID)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "planet not found"})
-		return
-	}
-
 	switch req.Resource {
-	case "metal":
-		planet.Metal += req.Amount
-	case "crystal":
-		planet.Crystal += req.Amount
-	case "gas":
-		planet.Gas += req.Amount
+	case "metal", "crystal", "gas":
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid resource"})
 		return
 	}
 
-	if err := h.service.repo.UpdateResources(r.Context(), req.PlanetID, planet.Metal, planet.Crystal, planet.Gas, time.Now()); err != nil {
-		slog.Error("update resources failed", "error", err)
+	if err := h.service.repo.AtomicAddResource(r.Context(), req.PlanetID, req.Resource, req.Amount); err != nil {
+		slog.Error("atomic add resource failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
@@ -1156,7 +1126,8 @@ func (h *Handler) UpgradeMoonBuilding(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	if _, err := strconv.Atoi(userIDStr); err != nil {
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid user"})
 		return
 	}
@@ -1186,11 +1157,14 @@ func (h *Handler) UpgradeMoonBuilding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.service.StartMoonBuildingUpgrade(r.Context(), galaxy, system, position, buildingType); err != nil {
+	if err := h.service.StartMoonBuildingUpgrade(r.Context(), userID, galaxy, system, position, buildingType); err != nil {
 		slog.Error("upgrade moon building failed", "building", buildingType, "error", err)
 		code := http.StatusInternalServerError
 		msg := "internal error"
 		switch {
+		case errors.Is(err, ErrForbidden):
+			code = http.StatusForbidden
+			msg = "not your moon"
 		case errors.Is(err, ErrMoonNotFound):
 			code = http.StatusNotFound
 			msg = "moon not found"
@@ -1236,6 +1210,17 @@ func (h *Handler) InternalGetMoonBuildingLevel(w http.ResponseWriter, r *http.Re
 }
 
 func (h *Handler) LinkWormholes(w http.ResponseWriter, r *http.Request) {
+	userIDStr := r.Header.Get("X-User-ID")
+	if userIDStr == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid user"})
+		return
+	}
+
 	var req struct {
 		SourceGalaxy   int `json:"source_galaxy"`
 		SourceSystem   int `json:"source_system"`
@@ -1249,14 +1234,18 @@ func (h *Handler) LinkWormholes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.service.LinkWormholes(r.Context(), req.SourceGalaxy, req.SourceSystem, req.SourcePosition, req.TargetGalaxy, req.TargetSystem, req.TargetPosition); err != nil {
+	if err := h.service.LinkWormholes(r.Context(), userID, req.SourceGalaxy, req.SourceSystem, req.SourcePosition, req.TargetGalaxy, req.TargetSystem, req.TargetPosition); err != nil {
 		slog.Error("link wormholes failed", "error", err)
 		code := http.StatusInternalServerError
 		msg := "internal error"
-		if errors.Is(err, ErrWormholeNotFound) {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			code = http.StatusForbidden
+			msg = "not your moon"
+		case errors.Is(err, ErrWormholeNotFound):
 			code = http.StatusBadRequest
 			msg = "wormhole generator not found on one or both moons"
-		} else {
+		default:
 			msg = err.Error()
 		}
 		writeJSON(w, code, map[string]string{"error": msg})

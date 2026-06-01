@@ -44,9 +44,6 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 }
 
 func (r *PostgresRepository) IsAdmin(ctx context.Context, playerID int) (bool, error) {
-	if playerID == 1 {
-		return true, nil
-	}
 	var count int
 	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM admin.admins WHERE player_id = $1`, playerID).Scan(&count)
 	if err != nil {

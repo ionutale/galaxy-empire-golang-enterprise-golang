@@ -73,7 +73,8 @@ func main() {
 	r.Post("/api/radar/planet-status", h.PlanetStatus)
 	r.Post("/api/radar/eu-scan", h.EUXScan)
 
-	r.Post("/internal/radar/detect", h.InternalDetect)
+	internalSecret := getEnv("INTERNAL_SECRET", "internal-dev-secret")
+	r.With(internalSecretMiddleware(internalSecret)).Post("/internal/radar/detect", h.InternalDetect)
 
 	srv := &http.Server{Addr: ":8089", Handler: r}
 	go func() {
@@ -93,6 +94,18 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 	srv.Shutdown(shutdownCtx)
+}
+
+func internalSecretMiddleware(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Internal-Secret") != secret {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func getEnv(key, fallback string) string {

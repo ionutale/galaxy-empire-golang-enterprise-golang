@@ -48,10 +48,10 @@ func (r *PostgresRepository) CreateFleet(ctx context.Context, f Fleet) (Fleet, e
 	var id int
 	var createdAt time.Time
 	err = r.pool.QueryRow(ctx, `
-		INSERT INTO fleet.fleets (player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, alliance_group_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO fleet.fleets (player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, alliance_group_id, cargo_metal, cargo_crystal, cargo_gas)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		RETURNING id, created_at
-	`, f.PlayerID, f.OriginPlanetID, f.TargetGalaxy, f.TargetSystem, f.TargetPosition, f.Mission, f.Status, f.SpeedPct, shipsJSON, f.ArrivesAt, f.AllianceGroupID).Scan(&id, &createdAt)
+	`, f.PlayerID, f.OriginPlanetID, f.TargetGalaxy, f.TargetSystem, f.TargetPosition, f.Mission, f.Status, f.SpeedPct, shipsJSON, f.ArrivesAt, f.AllianceGroupID, f.CargoMetal, f.CargoCrystal, f.CargoGas).Scan(&id, &createdAt)
 	if err != nil {
 		return Fleet{}, fmt.Errorf("create fleet: %w", err)
 	}
@@ -62,7 +62,7 @@ func (r *PostgresRepository) CreateFleet(ctx context.Context, f Fleet) (Fleet, e
 
 func (r *PostgresRepository) ListPlayerFleets(ctx context.Context, playerID int) ([]Fleet, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, created_at, COALESCE(alliance_group_id, 0)
+		SELECT id, player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, created_at, COALESCE(alliance_group_id, 0), COALESCE(cargo_metal, 0), COALESCE(cargo_crystal, 0), COALESCE(cargo_gas, 0)
 		FROM fleet.fleets
 		WHERE player_id = $1
 		ORDER BY created_at DESC
@@ -77,7 +77,7 @@ func (r *PostgresRepository) ListPlayerFleets(ctx context.Context, playerID int)
 		var f Fleet
 		var shipsJSON []byte
 		var arrivesAt *time.Time
-		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID); err != nil {
+		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID, &f.CargoMetal, &f.CargoCrystal, &f.CargoGas); err != nil {
 			return nil, fmt.Errorf("scan fleet: %w", err)
 		}
 		json.Unmarshal(shipsJSON, &f.Ships)
@@ -102,7 +102,10 @@ func (r *PostgresRepository) MarkFleetArrived(ctx context.Context, fleetID int) 
 
 func (r *PostgresRepository) CountPlayerFleets(ctx context.Context, playerID int) (int, error) {
 	var count int
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM fleet.fleets WHERE player_id = $1`, playerID).Scan(&count)
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM fleet.fleets
+		WHERE player_id = $1 AND status NOT IN ('arrived', 'completed', 'recalled')
+	`, playerID).Scan(&count)
 	return count, err
 }
 
@@ -111,9 +114,9 @@ func (r *PostgresRepository) GetFleetByID(ctx context.Context, fleetID int) (Fle
 	var shipsJSON []byte
 	var arrivesAt *time.Time
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, created_at, COALESCE(alliance_group_id, 0)
+		SELECT id, player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, created_at, COALESCE(alliance_group_id, 0), COALESCE(cargo_metal, 0), COALESCE(cargo_crystal, 0), COALESCE(cargo_gas, 0)
 		FROM fleet.fleets WHERE id = $1
-	`, fleetID).Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID)
+	`, fleetID).Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID, &f.CargoMetal, &f.CargoCrystal, &f.CargoGas)
 	if err != nil {
 		return Fleet{}, err
 	}
@@ -173,7 +176,7 @@ func (r *PostgresRepository) UpsertAttackCooldown(ctx context.Context, attackerI
 
 func (r *PostgresRepository) GetArrivedFleets(ctx context.Context) ([]Fleet, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, created_at, COALESCE(alliance_group_id, 0)
+		SELECT id, player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, created_at, COALESCE(alliance_group_id, 0), COALESCE(cargo_metal, 0), COALESCE(cargo_crystal, 0), COALESCE(cargo_gas, 0)
 		FROM fleet.fleets
 		WHERE (status = 'in_transit' OR status = 'returning') AND arrives_at <= NOW()
 	`)
@@ -187,7 +190,7 @@ func (r *PostgresRepository) GetArrivedFleets(ctx context.Context) ([]Fleet, err
 		var f Fleet
 		var shipsJSON []byte
 		var arrivesAt *time.Time
-		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID); err != nil {
+		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID, &f.CargoMetal, &f.CargoCrystal, &f.CargoGas); err != nil {
 			return nil, fmt.Errorf("scan fleet: %w", err)
 		}
 		json.Unmarshal(shipsJSON, &f.Ships)
@@ -201,7 +204,7 @@ func (r *PostgresRepository) GetArrivedFleets(ctx context.Context) ([]Fleet, err
 
 func (r *PostgresRepository) GetACSGroupFleets(ctx context.Context, allianceGroupID int) ([]Fleet, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, created_at, COALESCE(alliance_group_id, 0)
+		SELECT id, player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, created_at, COALESCE(alliance_group_id, 0), COALESCE(cargo_metal, 0), COALESCE(cargo_crystal, 0), COALESCE(cargo_gas, 0)
 		FROM fleet.fleets
 		WHERE alliance_group_id = $1
 	`, allianceGroupID)
@@ -215,7 +218,7 @@ func (r *PostgresRepository) GetACSGroupFleets(ctx context.Context, allianceGrou
 		var f Fleet
 		var shipsJSON []byte
 		var arrivesAt *time.Time
-		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID); err != nil {
+		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID, &f.CargoMetal, &f.CargoCrystal, &f.CargoGas); err != nil {
 			return nil, fmt.Errorf("scan fleet: %w", err)
 		}
 		json.Unmarshal(shipsJSON, &f.Ships)
@@ -229,7 +232,7 @@ func (r *PostgresRepository) GetACSGroupFleets(ctx context.Context, allianceGrou
 
 func (r *PostgresRepository) GetACSDefendFleets(ctx context.Context, targetGalaxy, targetSystem, targetPosition int) ([]Fleet, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, created_at, COALESCE(alliance_group_id, 0)
+		SELECT id, player_id, origin_planet_id, target_galaxy, target_system, target_position, mission, status, speed_pct, ships, arrives_at, created_at, COALESCE(alliance_group_id, 0), COALESCE(cargo_metal, 0), COALESCE(cargo_crystal, 0), COALESCE(cargo_gas, 0)
 		FROM fleet.fleets
 		WHERE mission = 'acs_defend' AND status = 'stationed'
 		AND target_galaxy = $1 AND target_system = $2 AND target_position = $3
@@ -244,7 +247,7 @@ func (r *PostgresRepository) GetACSDefendFleets(ctx context.Context, targetGalax
 		var f Fleet
 		var shipsJSON []byte
 		var arrivesAt *time.Time
-		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID); err != nil {
+		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID, &f.CargoMetal, &f.CargoCrystal, &f.CargoGas); err != nil {
 			return nil, fmt.Errorf("scan fleet: %w", err)
 		}
 		json.Unmarshal(shipsJSON, &f.Ships)
@@ -331,7 +334,7 @@ func (m *mockRepo) MarkFleetArrived(ctx context.Context, fleetID int) error {
 func (m *mockRepo) CountPlayerFleets(ctx context.Context, playerID int) (int, error) {
 	count := 0
 	for _, f := range m.fleets {
-		if f.PlayerID == playerID {
+		if f.PlayerID == playerID && f.Status != "arrived" && f.Status != "completed" && f.Status != "recalled" {
 			count++
 		}
 	}

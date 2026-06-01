@@ -27,7 +27,14 @@
   }
 
   function logout() {
+    if (chatSocket) { chatSocket.close(); chatSocket = null }
+    if (notificationSocket) { notificationSocket.close(); notificationSocket = null }
+    if (pollInterval) clearInterval(pollInterval)
     token = null; user = null; planet = null
+    notifications = []; notificationUnread = 0
+    chatMessages = []; chatView = null; messagingView = null
+    allianceView = null; buddyView = null; fleetView = null; fleetData = null
+    galaxyData = null; positions = null; shipyardData = null
     localStorage.removeItem('token')
   }
 
@@ -342,7 +349,11 @@
         }
       } catch (err) { /* ignore */ }
     }
-    chatSocket.onerror = () => { chatConnected = false }
+    chatSocket.onerror = () => {
+      chatConnected = false
+      chatSocket = null
+      setTimeout(() => { if (token && chatView) connectChatSSE() }, 5000)
+    }
   }
 
   async function sendChat() {
@@ -960,7 +971,10 @@
         }
       } catch (err) { /* ignore */ }
     }
-    notificationSocket.onerror = () => { /* ignore */ }
+    notificationSocket.onerror = () => {
+      notificationSocket = null
+      setTimeout(() => { if (token && !notificationSocket) connectNotificationSSE() }, 5000)
+    }
   }
 
   async function markNotificationRead(id) {
@@ -1660,34 +1674,34 @@
           <div class="res metal">
             <span class="label">Metal</span>
             <span class="val">{planet.metal}</span>
-            <span class="rate">+{planet.production.metal.toFixed(1)}/s</span>
+            <span class="rate">+{planet.production?.metal?.toFixed(1) ?? '0.0'}/s</span>
             <div class="storage-bar">
-              <div class="fill" style="width: {Math.min(100, planet.metal / planet.storage.metal * 100)}%"></div>
+              <div class="fill" style="width: {planet.storage?.metal > 0 ? Math.min(100, planet.metal / planet.storage.metal * 100) : 0}%"></div>
             </div>
-            <span class="cap">{planet.metal}/{planet.storage.metal}</span>
+            <span class="cap">{planet.metal}/{planet.storage?.metal ?? 0}</span>
           </div>
           <div class="res crystal">
             <span class="label">Crystal</span>
             <span class="val">{planet.crystal}</span>
-            <span class="rate">+{planet.production.crystal.toFixed(1)}/s</span>
+            <span class="rate">+{planet.production?.crystal?.toFixed(1) ?? '0.0'}/s</span>
             <div class="storage-bar">
-              <div class="fill" style="width: {Math.min(100, planet.crystal / planet.storage.crystal * 100)}%"></div>
+              <div class="fill" style="width: {planet.storage?.crystal > 0 ? Math.min(100, planet.crystal / planet.storage.crystal * 100) : 0}%"></div>
             </div>
-            <span class="cap">{planet.crystal}/{planet.storage.crystal}</span>
+            <span class="cap">{planet.crystal}/{planet.storage?.crystal ?? 0}</span>
           </div>
           <div class="res gas">
             <span class="label">Gas</span>
             <span class="val">{planet.gas}</span>
-            <span class="rate">+{planet.production.gas.toFixed(1)}/s</span>
+            <span class="rate">+{planet.production?.gas?.toFixed(1) ?? '0.0'}/s</span>
             <div class="storage-bar">
-              <div class="fill" style="width: {Math.min(100, planet.gas / planet.storage.gas * 100)}%"></div>
+              <div class="fill" style="width: {planet.storage?.gas > 0 ? Math.min(100, planet.gas / planet.storage.gas * 100) : 0}%"></div>
             </div>
-            <span class="cap">{planet.gas}/{planet.storage.gas}</span>
+            <span class="cap">{planet.gas}/{planet.storage?.gas ?? 0}</span>
           </div>
           <div class="res energy" class:negative={planet.energy < 0}>
             <span class="label">{planet.energy < 0 ? '⚡' : '⚡'} Energy</span>
             <span class="val" class:red={planet.energy < 0}>{planet.energy}</span>
-            <span class="rate">+{planet.production.energy.toFixed(1)}/s</span>
+            <span class="rate">+{planet.production?.energy?.toFixed(1) ?? '0.0'}/s</span>
           </div>
         </div>
 

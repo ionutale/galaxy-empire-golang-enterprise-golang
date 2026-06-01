@@ -158,6 +158,9 @@ func (s *ChatService) validateToken(r *http.Request) (int, error) {
 
 	claims := &jwtClaims{}
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
 		return s.jwtKey, nil
 	})
 	if err != nil || !token.Valid {

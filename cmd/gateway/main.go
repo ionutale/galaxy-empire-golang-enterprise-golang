@@ -51,6 +51,14 @@ func main() {
 	tutorialAddr := getEnv("TUTORIAL_SERVICE_ADDR", "http://localhost:8097")
 	adminAddr := getEnv("ADMIN_SERVICE_ADDR", "http://localhost:8096")
 	jwtKey := []byte(getEnv("JWT_SECRET", "dev-secret-change-in-production"))
+	if len(jwtKey) < 32 {
+		slog.Error("JWT_SECRET must be at least 32 characters")
+		os.Exit(1)
+	}
+	internalSecret := getEnv("INTERNAL_SECRET", "internal-dev-secret")
+	if internalSecret == "internal-dev-secret" {
+		slog.Warn("INTERNAL_SECRET is using the default dev value — change this in production")
+	}
 	shutdownTimeout := getEnvDuration("SHUTDOWN_TIMEOUT", 15*time.Second)
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -198,8 +206,16 @@ func main() {
 			r.Post("/tutorial/{step}/claim", proxyToService(tutorialAddr))
 			r.Post("/tutorial/skip", proxyToService(tutorialAddr))
 		})
-		r.Get("/chat/stream", proxyToService(chatAddr))
-		r.Get("/notification/stream", proxyToService(notificationAddr))
+		stripTrustHeaders := func(next http.HandlerFunc) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				r.Header.Del("X-User-ID")
+				r.Header.Del("X-User-Email")
+				r.Header.Del("X-Internal-Secret")
+				next(w, r)
+			}
+		}
+		r.Get("/chat/stream", stripTrustHeaders(proxyToService(chatAddr)))
+		r.Get("/notification/stream", stripTrustHeaders(proxyToService(notificationAddr)))
 	})
 
 	srv := &http.Server{Addr: ":8080", Handler: r}
@@ -232,6 +248,9 @@ func jwtMiddleware(jwtKey []byte) func(http.Handler) http.Handler {
 
 			claims := &Claims{}
 			token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (any, error) {
+				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+					return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+				}
 				return jwtKey, nil
 			})
 			if err != nil || !token.Valid {
@@ -273,6 +292,11 @@ func proxyToService(serviceAddr string) http.HandlerFunc {
 		for k, v := range r.Header {
 			req.Header[k] = v
 		}
+
+		// Strip client-supplied trust headers so clients cannot forge internal identity
+		req.Header.Del("X-Internal-Secret")
+		req.Header.Del("X-User-ID")
+		req.Header.Del("X-User-Email")
 
 		if userID, ok := r.Context().Value(ctxKeyUserID).(int); ok {
 			req.Header.Set("X-User-ID", strconv.Itoa(userID))
@@ -323,6 +347,11 @@ func fleetProxy(addr string) http.HandlerFunc {
 		for k, v := range r.Header {
 			req.Header[k] = v
 		}
+
+		// Strip client-supplied trust headers so clients cannot forge internal identity
+		req.Header.Del("X-Internal-Secret")
+		req.Header.Del("X-User-ID")
+		req.Header.Del("X-User-Email")
 
 		if userID, ok := r.Context().Value(ctxKeyUserID).(int); ok {
 			req.Header.Set("X-User-ID", strconv.Itoa(userID))

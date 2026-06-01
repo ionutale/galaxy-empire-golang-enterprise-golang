@@ -39,6 +39,8 @@ func main() {
 	svc := NewPlanetService(repo)
 	h := NewHandler(svc)
 
+	internalSecret := getEnv("INTERNAL_SECRET", "internal-dev-secret")
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -65,24 +67,35 @@ func main() {
 		w.Write([]byte(`{"status":"ok","service":"planet"}`))
 	})
 
-	r.Post("/internal/ships/deduct", h.InternalDeductShips)
-	r.Post("/internal/ships/add", h.InternalAddShips)
-	r.Post("/internal/planet/coords", h.InternalGetPlanetCoords)
-	r.Post("/internal/planet/by-coords", h.InternalFindPlanetByCoords)
-	r.Post("/internal/resources/deduct", h.InternalDeductResource)
-	r.Post("/internal/resources/add", h.InternalAddResource)
-	r.Post("/internal/player/techs", h.InternalGetPlayerTechs)
-	r.Post("/internal/planet/info", h.InternalGetPlanetInfo)
-	r.Post("/internal/planet/create", h.InternalCreatePlanet)
-	r.Post("/internal/defense/repair", h.InternalDefenseRepair)
-	r.Post("/internal/defense/deduct", h.InternalDefenseDeduct)
-	r.Post("/internal/defense/list", h.InternalDefenseList)
-	r.Post("/internal/player/tech/add", h.InternalAddTechLevel)
-	r.Post("/internal/player/tech-level", h.InternalGetPlayerTechLevel)
-	r.Post("/internal/planet/building-level", h.InternalGetBuildingLevel)
-	r.Post("/internal/player/highest-lab", h.InternalGetHighestLabLevel)
-	r.Post("/internal/moon/building-level", h.InternalGetMoonBuildingLevel)
-	r.Post("/internal/wormhole/info", h.InternalWormholeInfo)
+	r.Group(func(r chi.Router) {
+		r.Use(internalSecretMiddleware(internalSecret))
+		r.Post("/internal/ships/deduct", h.InternalDeductShips)
+		r.Post("/internal/ships/add", h.InternalAddShips)
+		r.Post("/internal/planet/coords", h.InternalGetPlanetCoords)
+		r.Post("/internal/planet/by-coords", h.InternalFindPlanetByCoords)
+		r.Post("/internal/resources/deduct", h.InternalDeductResource)
+		r.Post("/internal/resources/add", h.InternalAddResource)
+		r.Post("/internal/player/techs", h.InternalGetPlayerTechs)
+		r.Post("/internal/planet/info", h.InternalGetPlanetInfo)
+		r.Post("/internal/planet/create", h.InternalCreatePlanet)
+		r.Post("/internal/defense/repair", h.InternalDefenseRepair)
+		r.Post("/internal/defense/deduct", h.InternalDefenseDeduct)
+		r.Post("/internal/defense/list", h.InternalDefenseList)
+		r.Post("/internal/player/tech/add", h.InternalAddTechLevel)
+		r.Post("/internal/player/tech-level", h.InternalGetPlayerTechLevel)
+		r.Post("/internal/planet/building-level", h.InternalGetBuildingLevel)
+		r.Post("/internal/player/highest-lab", h.InternalGetHighestLabLevel)
+		r.Post("/internal/moon/building-level", h.InternalGetMoonBuildingLevel)
+		r.Post("/internal/wormhole/info", h.InternalWormholeInfo)
+		r.Post("/internal/stargate/check-link", h.InternalCheckStarGateLink)
+		r.Post("/internal/defense/deduct-abms", h.InternalDeductABMs)
+		r.Post("/internal/planet/gem-bonuses", h.InternalGemBonuses)
+		r.Post("/internal/npc/seed", h.InternalSeedNPC)
+		r.Post("/internal/npc/seed-all", h.InternalSeedAllNPC)
+		r.Post("/internal/npc/clear", h.InternalClearNPC)
+		r.Post("/internal/npc/check", h.InternalCheckNPC)
+	})
+
 	r.Get("/api/planet/mine", h.GetMyPlanet)
 	r.Post("/api/planet/{id}/rename", h.RenamePlanet)
 	r.Post("/api/buildings/{type}/upgrade", h.StartUpgrade)
@@ -106,8 +119,6 @@ func main() {
 	r.Post("/api/planet/{id}/stargate/link", h.StarGateLink)
 	r.Post("/api/planet/{id}/stargate/unlink", h.StarGateUnlink)
 	r.Get("/api/planet/{id}/stargate/links", h.StarGateLinks)
-	r.Post("/internal/stargate/check-link", h.InternalCheckStarGateLink)
-	r.Post("/internal/defense/deduct-abms", h.InternalDeductABMs)
 
 	r.Post("/api/planet/{id}/missile/build-ipm", h.BuildIPM)
 	r.Post("/api/planet/{id}/missile/build-abm", h.BuildABM)
@@ -118,12 +129,6 @@ func main() {
 	r.Post("/api/planet/{id}/gems/equip", h.EquipGem)
 	r.Post("/api/planet/{id}/gems/unequip", h.UnequipGem)
 	r.Post("/api/planet/{id}/gems/combine", h.CombineGem)
-
-	r.Post("/internal/planet/gem-bonuses", h.InternalGemBonuses)
-	r.Post("/internal/npc/seed", h.InternalSeedNPC)
-	r.Post("/internal/npc/seed-all", h.InternalSeedAllNPC)
-	r.Post("/internal/npc/clear", h.InternalClearNPC)
-	r.Post("/internal/npc/check", h.InternalCheckNPC)
 
 	srv := &http.Server{Addr: ":8082", Handler: r}
 	go func() {
@@ -160,6 +165,18 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		}
 	}
 	return fallback
+}
+
+func internalSecretMiddleware(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Internal-Secret") != secret {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {

@@ -80,8 +80,15 @@ func main() {
 	r.Post("/api/nebula/credits-balance", h.CreditsBalance)
 	r.Post("/api/nebula/credits-spend", h.CreditsSpend)
 	r.Get("/api/nebula/credits-transactions", h.CreditsTransactions)
-	r.Post("/internal/nebula/credits/add", h.InternalAddCredits)
-	r.Post("/internal/nebula/commanders/active", h.InternalActiveCommanders)
+	internalSecret := os.Getenv("INTERNAL_SECRET")
+	if internalSecret == "" {
+		internalSecret = "internal-dev-secret"
+	}
+	r.Group(func(r chi.Router) {
+		r.Use(internalSecretMiddleware(internalSecret))
+		r.Post("/internal/nebula/credits/add", h.InternalAddCredits)
+		r.Post("/internal/nebula/commanders/active", h.InternalActiveCommanders)
+	})
 
 	r.Post("/api/nebula/daily-gift/claim", h.ClaimDailyGift)
 	r.Get("/api/nebula/daily-gift/status", h.GetDailyGiftStatus)
@@ -112,6 +119,18 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 	srv.Shutdown(shutdownCtx)
+}
+
+func internalSecretMiddleware(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Internal-Secret") != secret {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func getEnv(key, fallback string) string {

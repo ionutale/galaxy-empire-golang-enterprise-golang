@@ -113,26 +113,35 @@ func (s *CombatService) Resolve(ctx context.Context, req resolveRequest) (resolv
 		return resolveResponse{}, fmt.Errorf("save report: %w", err)
 	}
 
-	if !isEmpty(result.DefenderShipsAfter) {
-		if err := s.deductDefenderShips(ctx, defInfo.PlanetID, diffShips(defenderShips, result.DefenderShipsAfter)); err != nil {
-			slog.Error("deduct defender ships failed", "error", err)
+	// Deduct ships lost by defender — always compute from before/after, not just when survivors remain
+	lostDefenderShips := diffShips(defenderShips, result.DefenderShipsAfter)
+	if len(lostDefenderShips) > 0 {
+		if err := s.deductDefenderShips(ctx, defInfo.PlanetID, lostDefenderShips); err != nil {
+			// Combat already happened — ships are logically gone; log prominently for reconciliation
+			slog.Error("RECONCILIATION NEEDED: deduct defender ships failed", "planet_id", defInfo.PlanetID, "lost_ships", lostDefenderShips, "error", err)
 		}
 	}
 
 	if result.AttackerWon && !isEmpty(result.AttackerLoot) {
-		for res, amt := range result.AttackerLoot {
-			if amt > 0 {
-				if err := s.addLootToAttacker(ctx, req.OriginPlanet, res, amt); err != nil {
-					slog.Error("add loot failed", "resource", res, "error", err)
-				}
-			}
-		}
-
+		// Deduct from defender first; only add loot to attacker if deduction succeeds
+		deductOK := true
 		if defInfo.PlanetID > 0 {
 			for res, amt := range result.DefenderLostRes {
 				if amt > 0 {
 					if err := s.deductDefenderResources(ctx, defInfo.PlanetID, res, amt); err != nil {
 						slog.Error("deduct defender resources failed", "resource", res, "error", err)
+						deductOK = false
+					}
+				}
+			}
+		}
+
+		if deductOK {
+			for res, amt := range result.AttackerLoot {
+				if amt > 0 {
+					if err := s.addLootToAttacker(ctx, req.OriginPlanet, res, amt); err != nil {
+						// Resources already deducted from defender; log for reconciliation but continue
+						slog.Error("RECONCILIATION NEEDED: add loot failed after successful defender deduction", "resource", res, "amount", amt, "error", err)
 					}
 				}
 			}

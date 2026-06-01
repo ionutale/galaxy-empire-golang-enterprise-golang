@@ -82,8 +82,9 @@ func main() {
 	r.Get("/api/alliance/shared-reports", h.GetSharedReports)
 	r.Post("/api/alliance/unshare-report", h.UnshareReport)
 
-	r.Post("/internal/alliance/player", h.InternalGetPlayerAlliance)
-	r.Post("/internal/alliance/ping", h.InternalPing)
+	internalSecret := getEnv("INTERNAL_SECRET", "internal-secret")
+	r.With(internalSecretMiddleware(internalSecret)).Post("/internal/alliance/player", h.InternalGetPlayerAlliance)
+	r.With(internalSecretMiddleware(internalSecret)).Post("/internal/alliance/ping", h.InternalPing)
 
 	srv := &http.Server{Addr: ":8087", Handler: r}
 	go func() {
@@ -103,6 +104,18 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 	srv.Shutdown(shutdownCtx)
+}
+
+func internalSecretMiddleware(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Internal-Secret") != secret {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func getEnv(key, fallback string) string {

@@ -15,6 +15,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func internalSecretMiddleware(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Internal-Secret") != secret {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
@@ -40,6 +52,11 @@ func main() {
 	svc := NewCombatService(repo, planetBaseURL)
 	h := NewCombatHandler(svc)
 
+	internalSecret := os.Getenv("INTERNAL_SECRET")
+	if internalSecret == "" {
+		internalSecret = "internal-dev-secret"
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -59,18 +76,21 @@ func main() {
 		if err := pool.Ping(pingCtx); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			json.NewEncoder(w).Encode(map[string]string{"status":"unavailable","error":err.Error()})
+			json.NewEncoder(w).Encode(map[string]string{"status": "unavailable", "error": err.Error()})
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok","service":"combat"}`))
 	})
 
-	r.Post("/combat/resolve", h.Resolve)
-	r.Post("/combat/missile-strike", h.MissileStrike)
-	r.Post("/combat/moon-info", h.MoonInfo)
-	r.Get("/combat/reports/{id}", h.GetReport)
-	r.Get("/combat/reports/by-player", h.ListPlayerReports)
+	r.Group(func(r chi.Router) {
+		r.Use(internalSecretMiddleware(internalSecret))
+		r.Post("/combat/resolve", h.Resolve)
+		r.Post("/combat/missile-strike", h.MissileStrike)
+		r.Post("/combat/moon-info", h.MoonInfo)
+		r.Get("/combat/reports/{id}", h.GetReport)
+		r.Get("/combat/reports/by-player", h.ListPlayerReports)
+	})
 
 	srv := &http.Server{Addr: ":8084", Handler: r}
 	go func() {

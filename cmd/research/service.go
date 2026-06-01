@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"time"
 )
@@ -12,6 +13,7 @@ var (
 	ErrInvalidTech         = errors.New("invalid tech type")
 	ErrPrerequisitesNotMet = errors.New("prerequisites not met")
 	ErrAlreadyResearching  = errors.New("already researching this tech")
+	ErrResearchInProgress  = errors.New("research already in progress")
 	ErrNoActiveResearch    = errors.New("no active research for this tech")
 	ErrTechNotFound        = errors.New("tech not found")
 )
@@ -93,8 +95,17 @@ func (s *ResearchService) StartResearch(ctx context.Context, playerID, planetID 
 		return StartResearchResponse{}, fmt.Errorf("get tech level: %w", err)
 	}
 
-	if err := s.checkPrerequisites(ctx, playerID, cfg.Prerequisites); err != nil {
+	if err := s.checkPrerequisites(ctx, playerID, planetID, cfg.Prerequisites); err != nil {
 		return StartResearchResponse{}, err
+	}
+
+	// Check if player already has any active research (global one-at-a-time limit)
+	activeCount, err := s.repo.CountActiveResearch(ctx, playerID)
+	if err != nil {
+		return StartResearchResponse{}, fmt.Errorf("checking active research: %w", err)
+	}
+	if activeCount > 0 {
+		return StartResearchResponse{}, ErrResearchInProgress
 	}
 
 	active, err := s.repo.GetActiveResearch(ctx, playerID, techType)
@@ -122,7 +133,7 @@ func (s *ResearchService) StartResearch(ctx context.Context, playerID, planetID 
 	duration := researchDuration(costMetal, costCrystal, labLevel)
 	completesAt := time.Now().Add(duration)
 
-	_, err = s.repo.CreateResearch(ctx, playerID, techType, targetLevel, completesAt)
+	_, err = s.repo.CreateResearch(ctx, playerID, planetID, techType, targetLevel, completesAt)
 	if err != nil {
 		return StartResearchResponse{}, fmt.Errorf("create research: %w", err)
 	}
@@ -159,6 +170,23 @@ func (s *ResearchService) CancelResearch(ctx context.Context, playerID int, tech
 
 	if err := s.repo.CancelResearchWithRefund(ctx, active.ID, playerID, refundMetal, refundCrystal, refundGas); err != nil {
 		return CancelResearchResponse{}, fmt.Errorf("cancel: %w", err)
+	}
+
+	// Return 50% of spent resources to the planet
+	if refundMetal > 0 {
+		if err := s.addResource(ctx, active.PlanetID, "metal", refundMetal); err != nil {
+			slog.Error("research cancel: failed to refund metal", "error", err, "planet_id", active.PlanetID)
+		}
+	}
+	if refundCrystal > 0 {
+		if err := s.addResource(ctx, active.PlanetID, "crystal", refundCrystal); err != nil {
+			slog.Error("research cancel: failed to refund crystal", "error", err, "planet_id", active.PlanetID)
+		}
+	}
+	if refundGas > 0 {
+		if err := s.addResource(ctx, active.PlanetID, "gas", refundGas); err != nil {
+			slog.Error("research cancel: failed to refund gas", "error", err, "planet_id", active.PlanetID)
+		}
 	}
 
 	return CancelResearchResponse{
@@ -215,9 +243,16 @@ func (s *ResearchService) fetchTechLevels(ctx context.Context, playerID int) (ma
 	return levels, nil
 }
 
-func (s *ResearchService) checkPrerequisites(ctx context.Context, playerID int, prereqs []Prereq) error {
+func (s *ResearchService) checkPrerequisites(ctx context.Context, playerID, planetID int, prereqs []Prereq) error {
 	for _, p := range prereqs {
 		if p.Type == "research_lab" {
+			labLevel, err := s.fetchBuildingLevel(ctx, planetID, "research_lab")
+			if err != nil {
+				return err
+			}
+			if labLevel < p.Level {
+				return ErrPrerequisitesNotMet
+			}
 			continue
 		}
 		level, err := s.fetchTechLevel(ctx, playerID, p.Type)
@@ -264,6 +299,24 @@ func (s *ResearchService) deductSingle(ctx context.Context, planetID int, resour
 	}
 	if result.Error != "" {
 		return fmt.Errorf("deduct %s: %s", resource, result.Error)
+	}
+	return nil
+}
+
+func (s *ResearchService) addResource(ctx context.Context, planetID int, resource string, amount int) error {
+	body := fmt.Sprintf(`{"planet_id":%d,"resource":"%s","amount":%d}`, planetID, resource, amount)
+	resp, err := s.httpPost(ctx, s.planetAddr+"/internal/resources/add", body)
+	if err != nil {
+		return fmt.Errorf("add %s: %w", resource, err)
+	}
+	var result struct {
+		Error string `json:"error"`
+	}
+	if err := parseJSON(resp, &result); err != nil {
+		return nil
+	}
+	if result.Error != "" {
+		return fmt.Errorf("add %s: %s", resource, result.Error)
 	}
 	return nil
 }

@@ -24,6 +24,7 @@ type Prereq struct {
 type ResearchQueue struct {
 	ID          int       `json:"id"`
 	PlayerID    int       `json:"player_id"`
+	PlanetID    int       `json:"planet_id"`
 	TechType    string    `json:"tech_type"`
 	TargetLevel int       `json:"target_level"`
 	StartedAt   time.Time `json:"started_at"`
