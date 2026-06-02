@@ -22,6 +22,7 @@ type Repository interface {
 	SeedDefensesForPlanet(ctx context.Context, planetID int) error
 	SeedTechnologiesForPlanet(ctx context.Context, planetID int) error
 	UpdateResources(ctx context.Context, planetID, metal, crystal, gas int, updatedAt time.Time) error
+	UpdateResourcesAtomically(ctx context.Context, planetID, metal, crystal, gas int, expectedUpdatedAt, newUpdatedAt time.Time) error
 	UpdateMaxFields(ctx context.Context, planetID, maxFields int) error
 	GetBuildings(ctx context.Context, planetID int) ([]Building, error)
 	GetBuildingLevel(ctx context.Context, planetID int, buildingType string) (int, error)
@@ -57,6 +58,8 @@ type Repository interface {
 	GetMoonBuildings(ctx context.Context, galaxy, system, position int) ([]MoonBuilding, error)
 	GetMoonBuildingLevel(ctx context.Context, galaxy, system, position int, buildingType string) (int, error)
 	UpdateMoonBuildingLevel(ctx context.Context, galaxy, system, position int, buildingType string, level int) error
+	HasPendingMoonBuild(ctx context.Context, galaxy, system, position int, buildingType string) (bool, error)
+	SetMoonBuildCooldown(ctx context.Context, galaxy, system, position int, buildingType string, duration time.Duration) error
 
 	// Wormholes
 	GetWormhole(ctx context.Context, galaxy, system, position int) (*WormholeEntry, error)
@@ -270,17 +273,36 @@ func (r *PostgresRepository) CreateAtCoords(ctx context.Context, userID int, gal
 		return Planet{}, nil, fmt.Errorf("insert planet: %w", err)
 	}
 
-	if err := r.SeedBuildingsForPlanet(ctx, p.ID); err != nil {
-		return Planet{}, nil, err
+	// Seed buildings inside the transaction so they roll back if the commit fails.
+	seedTypes := []string{
+		"metal_mine", "crystal_mine", "gas_mine", "solar_plant",
+		"metal_storage", "crystal_storage", "gas_storage",
+		"robotics_factory", "nanite_factory", "terraformer",
+	}
+	for _, bType := range seedTypes {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO planet.buildings (planet_id, type, level)
+			 VALUES ($1, $2, 1)
+			 ON CONFLICT (planet_id, type) DO NOTHING`,
+			p.ID, bType,
+		); err != nil {
+			return Planet{}, nil, fmt.Errorf("seed building %s: %w", bType, err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO planet.buildings (planet_id, type, level)
+		VALUES ($1, 'missile_silo', 1)
+		ON CONFLICT (planet_id, type) DO NOTHING
+	`, p.ID); err != nil {
+		return Planet{}, nil, fmt.Errorf("seed missile silo: %w", err)
 	}
 
-	buildings, err := r.GetBuildings(ctx, p.ID)
-	if err != nil {
-		return Planet{}, nil, fmt.Errorf("get buildings after seed: %w", err)
-	}
-
-	if err := r.SeedTechnologiesForPlanet(ctx, p.ID); err != nil {
-		return Planet{}, nil, err
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO planet.player_technologies (user_id, type, level)
+		SELECT $1, 'energy_tech', 3
+		ON CONFLICT (user_id, type) DO NOTHING
+	`, userID); err != nil {
+		return Planet{}, nil, fmt.Errorf("seed technologies: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -291,12 +313,38 @@ func (r *PostgresRepository) CreateAtCoords(ctx context.Context, userID int, gal
 		return Planet{}, nil, fmt.Errorf("create progress: %w", err)
 	}
 
-	if err := r.SeedShipsForPlanet(ctx, p.ID); err != nil {
-		return Planet{}, nil, err
+	shipTypes := []string{
+		"cargo", "large_cargo", "recycler", "espionage_probe", "colony_ship",
+		"solar_satellite", "light_fighter", "heavy_fighter", "cruiser",
+		"battleship", "dreadnought", "bomber",
+	}
+	for _, sType := range shipTypes {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO planet.player_ships (planet_id, ship_type, quantity)
+			VALUES ($1, $2, 0)
+			ON CONFLICT (planet_id, ship_type) DO NOTHING
+		`, p.ID, sType); err != nil {
+			return Planet{}, nil, fmt.Errorf("seed ship %s: %w", sType, err)
+		}
 	}
 
-	if err := r.SeedDefensesForPlanet(ctx, p.ID); err != nil {
-		return Planet{}, nil, err
+	defenseTypes := []string{
+		"rocket_launcher", "light_laser", "heavy_laser", "mk2_cannon",
+		"ion_cannon", "plasma_cannon", "proton_cannon",
+	}
+	for _, dType := range defenseTypes {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO planet.player_defenses (planet_id, defense_type, quantity)
+			VALUES ($1, $2, 0)
+			ON CONFLICT (planet_id, defense_type) DO NOTHING
+		`, p.ID, dType); err != nil {
+			return Planet{}, nil, fmt.Errorf("seed defense %s: %w", dType, err)
+		}
+	}
+
+	buildings, err := r.GetBuildings(ctx, p.ID)
+	if err != nil {
+		return Planet{}, nil, fmt.Errorf("get buildings after seed: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -390,6 +438,25 @@ func (r *PostgresRepository) UpdateResources(ctx context.Context, planetID, meta
 		metal, crystal, gas, updatedAt, planetID,
 	)
 	return err
+}
+
+// UpdateResourcesAtomically updates resources only when resources_updated_at
+// still matches expectedUpdatedAt, preventing a lost-update race when two
+// requests compute production concurrently from the same snapshot.
+func (r *PostgresRepository) UpdateResourcesAtomically(ctx context.Context, planetID, metal, crystal, gas int, expectedUpdatedAt, newUpdatedAt time.Time) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE planet.planets
+		 SET metal = $1, crystal = $2, gas = $3, resources_updated_at = $4
+		 WHERE id = $5 AND resources_updated_at = $6`,
+		metal, crystal, gas, newUpdatedAt, planetID, expectedUpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("update resources atomically: %w", err)
+	}
+	// RowsAffected == 0 means another request already advanced the timestamp;
+	// the caller's in-memory state is still valid for this request, so we do
+	// not treat this as an error.
+	return nil
 }
 
 func (r *PostgresRepository) AtomicDeductResource(ctx context.Context, planetID int, resource string, amount int) error {
@@ -511,15 +578,29 @@ func (r *PostgresRepository) GetActiveQueue(ctx context.Context, planetID int) (
 }
 
 func (r *PostgresRepository) CreateQueueEntry(ctx context.Context, planetID int, buildingType string, targetLevel int, completesAt time.Time) (QueueEntry, error) {
-	var q QueueEntry
-	err := r.pool.QueryRow(ctx,
+	ct, err := r.pool.Exec(ctx,
 		`INSERT INTO planet.construction_queue (planet_id, building_type, target_level, status, completes_at)
 		 VALUES ($1, $2, $3, 'upgrade', $4)
-		 RETURNING id, building_type, target_level, status, completes_at`,
+		 ON CONFLICT (planet_id, building_type) WHERE status = 'upgrade' AND completed = FALSE DO NOTHING`,
 		planetID, buildingType, targetLevel, completesAt,
+	)
+	if err != nil {
+		return QueueEntry{}, fmt.Errorf("insert build queue: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return QueueEntry{}, ErrBuildAlreadyInProgress
+	}
+
+	var q QueueEntry
+	err = r.pool.QueryRow(ctx,
+		`SELECT id, building_type, target_level, status, completes_at
+		 FROM planet.construction_queue
+		 WHERE planet_id = $1 AND building_type = $2 AND completed = FALSE AND status = 'upgrade'
+		 ORDER BY started_at DESC LIMIT 1`,
+		planetID, buildingType,
 	).Scan(&q.ID, &q.BuildingType, &q.TargetLevel, &q.Status, &q.CompletesAt)
 	if err != nil {
-		return QueueEntry{}, fmt.Errorf("create queue entry: %w", err)
+		return QueueEntry{}, fmt.Errorf("fetch queue entry: %w", err)
 	}
 	return q, nil
 }
@@ -531,17 +612,26 @@ func (r *PostgresRepository) CancelUpgradeWithRefund(ctx context.Context, planet
 	}
 	defer tx.Rollback(ctx)
 
+	// Delete the queue entry first and check that it still exists and is not
+	// completed. If RowsAffected == 0 the build already completed between the
+	// service-layer check and now — we must NOT give a refund in that case.
+	ct, err := tx.Exec(ctx,
+		`DELETE FROM planet.construction_queue WHERE id = $1 AND completed = FALSE`, queueID,
+	)
+	if err != nil {
+		return fmt.Errorf("cancel queue entry: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		// Build completed concurrently; no refund, no error from the player's
+		// perspective — the building upgrade simply went through.
+		return ErrNoActiveUpgrade
+	}
+
 	if _, err := tx.Exec(ctx,
 		`UPDATE planet.planets SET metal = metal + $1, crystal = crystal + $2, gas = gas + $3, resources_updated_at = NOW() WHERE id = $4`,
 		refundMetal, refundCrystal, refundGas, planetID,
 	); err != nil {
 		return fmt.Errorf("refund resources: %w", err)
-	}
-
-	if _, err := tx.Exec(ctx,
-		`DELETE FROM planet.construction_queue WHERE id = $1 AND completed = FALSE`, queueID,
-	); err != nil {
-		return fmt.Errorf("cancel queue entry: %w", err)
 	}
 
 	return tx.Commit(ctx)
@@ -1049,6 +1139,38 @@ func (r *PostgresRepository) UpdateMoonBuildingLevel(ctx context.Context, galaxy
 	return nil
 }
 
+func (r *PostgresRepository) HasPendingMoonBuild(ctx context.Context, galaxy, system, position int, buildingType string) (bool, error) {
+	var lockedUntil time.Time
+	err := r.pool.QueryRow(ctx,
+		`SELECT locked_until FROM planet.moon_build_cooldowns
+		 WHERE moon_galaxy = $1 AND moon_system = $2 AND moon_position = $3 AND building_type = $4
+		   AND locked_until > NOW()`,
+		galaxy, system, position, buildingType,
+	).Scan(&lockedUntil)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("check moon build cooldown: %w", err)
+	}
+	return true, nil
+}
+
+func (r *PostgresRepository) SetMoonBuildCooldown(ctx context.Context, galaxy, system, position int, buildingType string, duration time.Duration) error {
+	lockedUntil := time.Now().Add(duration)
+	_, err := r.pool.Exec(ctx,
+		`INSERT INTO planet.moon_build_cooldowns (moon_galaxy, moon_system, moon_position, building_type, locked_until)
+		 VALUES ($1, $2, $3, $4, $5)
+		 ON CONFLICT (moon_galaxy, moon_system, moon_position, building_type)
+		 DO UPDATE SET locked_until = $5`,
+		galaxy, system, position, buildingType, lockedUntil,
+	)
+	if err != nil {
+		return fmt.Errorf("set moon build cooldown: %w", err)
+	}
+	return nil
+}
+
 func (r *PostgresRepository) GetWormhole(ctx context.Context, galaxy, system, position int) (*WormholeEntry, error) {
 	var w WormholeEntry
 	err := r.pool.QueryRow(ctx,
@@ -1139,17 +1261,27 @@ func (r *PostgresRepository) CompleteBuild(ctx context.Context, queueID int, bui
 	}
 	defer tx.Rollback(ctx)
 
-	if _, err := tx.Exec(ctx,
-		`UPDATE planet.construction_queue SET completed = TRUE WHERE id = $1`, queueID,
-	); err != nil {
+	// Atomically claim the entry; if another goroutine already completed it,
+	// RowsAffected will be 0 and we skip processing (idempotent).
+	var planetID int
+	err = tx.QueryRow(ctx,
+		`UPDATE planet.construction_queue
+		 SET completed = TRUE
+		 WHERE id = $1 AND completed = FALSE
+		 RETURNING planet_id`,
+		queueID,
+	).Scan(&planetID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Already completed by a concurrent call — nothing to do.
+			return tx.Rollback(ctx)
+		}
 		return fmt.Errorf("mark queue complete: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx,
-		`UPDATE planet.buildings SET level = $1 WHERE type = $2 AND planet_id = (
-			SELECT planet_id FROM planet.construction_queue WHERE id = $3
-		)`,
-		targetLevel, buildingType, queueID,
+		`UPDATE planet.buildings SET level = $1 WHERE type = $2 AND planet_id = $3`,
+		targetLevel, buildingType, planetID,
 	); err != nil {
 		return fmt.Errorf("update building level: %w", err)
 	}

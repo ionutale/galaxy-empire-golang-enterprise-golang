@@ -70,7 +70,7 @@ func (r *PostgresRepository) SearchUsers(ctx context.Context, q string, page, li
 
 	offset := (page - 1) * limit
 	rows, err := r.pool.Query(ctx,
-		`SELECT id, email, created_at FROM auth.users
+		`SELECT id, email, COALESCE(username, ''), COALESCE(banned, FALSE), created_at FROM auth.users
 		 WHERE email ILIKE '%' || $1 || '%'
 		 ORDER BY created_at DESC
 		 LIMIT $2 OFFSET $3`, q, limit, offset,
@@ -83,7 +83,7 @@ func (r *PostgresRepository) SearchUsers(ctx context.Context, q string, page, li
 	var users []UserSearchResult
 	for rows.Next() {
 		var u UserSearchResult
-		if err := rows.Scan(&u.ID, &u.Email, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Username, &u.IsBanned, &u.CreatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan user: %w", err)
 		}
 		users = append(users, u)
@@ -195,27 +195,59 @@ func (r *PostgresRepository) GetPlanetDefenses(ctx context.Context, planetID int
 }
 
 func (r *PostgresRepository) UpdatePlanetResources(ctx context.Context, planetID, metal, crystal, gas int) error {
-	_, err := r.pool.Exec(ctx,
+	// Fix #169: check RowsAffected so callers know when the planet does not exist.
+	ct, err := r.pool.Exec(ctx,
 		`UPDATE planet.planets SET metal = $1, crystal = $2, gas = $3, resources_updated_at = NOW() WHERE id = $4`,
 		metal, crystal, gas, planetID,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("planet %d not found", planetID)
+	}
+	return nil
 }
 
+// AddDM credits dark matter to a player.
+// Fix #166: dark matter is tracked in nebula.player_dark_matter (not planet.player_progress.vip_points).
+// The INSERT … ON CONFLICT ensures a row exists for new players and atomically updates the balance.
 func (r *PostgresRepository) AddDM(ctx context.Context, playerID, amount int) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE planet.player_progress SET vip_points = GREATEST(0, vip_points + $1) WHERE user_id = $2`,
+	ct, err := r.pool.Exec(ctx,
+		`INSERT INTO nebula.player_dark_matter (player_id, balance, total_earned)
+		 VALUES ($2, $1, $1)
+		 ON CONFLICT (player_id) DO UPDATE
+		   SET balance      = nebula.player_dark_matter.balance + $1,
+		       total_earned = nebula.player_dark_matter.total_earned + $1`,
 		amount, playerID,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("add DM: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("player %d not found", playerID)
+	}
+	return nil
 }
 
+// AddCredits credits Nebula credits to a player.
+// Fix #167: credits are tracked in nebula.player_credits (not planet.player_progress.total_resources_produced).
 func (r *PostgresRepository) AddCredits(ctx context.Context, playerID, amount int) error {
-	_, err := r.pool.Exec(ctx,
-		`UPDATE planet.player_progress SET total_resources_produced = GREATEST(0, total_resources_produced::bigint + $1) WHERE user_id = $2`,
+	ct, err := r.pool.Exec(ctx,
+		`INSERT INTO nebula.player_credits (player_id, balance, total_earned)
+		 VALUES ($2, $1, $1)
+		 ON CONFLICT (player_id) DO UPDATE
+		   SET balance      = nebula.player_credits.balance + $1,
+		       total_earned = nebula.player_credits.total_earned + $1`,
 		amount, playerID,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("add credits: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("player %d not found", playerID)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) SetBanned(ctx context.Context, playerID int, banned bool) error {

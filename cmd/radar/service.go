@@ -35,14 +35,38 @@ func (s *RadarService) Scan(ctx context.Context, playerID int) ([]RadarEvent, er
 	return events, nil
 }
 
-func (s *RadarService) GetEvents(ctx context.Context, playerID int) ([]RadarEvent, error) {
-	return s.repo.GetPlayerEvents(ctx, playerID)
+func (s *RadarService) GetEvents(ctx context.Context, playerID int, scope string) ([]RadarEvent, error) {
+	events, err := s.repo.GetPlayerEvents(ctx, playerID)
+	if err != nil {
+		return nil, err
+	}
+
+	switch scope {
+	case "incoming":
+		return filterEventsByType(events, "incoming_attack"), nil
+	case "espionage":
+		return filterEventsByType(events, "espionage"), nil
+	case "movement":
+		return filterEventsByType(events, "fleet_movement"), nil
+	default:
+		return events, nil
+	}
+}
+
+func filterEventsByType(events []RadarEvent, eventType string) []RadarEvent {
+	var result []RadarEvent
+	for _, e := range events {
+		if e.EventType == eventType {
+			result = append(result, e)
+		}
+	}
+	return result
 }
 
 func (s *RadarService) ResolveEvent(ctx context.Context, playerID int, eventID int) error {
-	events, err := s.repo.GetPlayerEvents(ctx, playerID)
+	events, err := s.repo.GetUnresolvedEvents(ctx, playerID)
 	if err != nil {
-		return fmt.Errorf("get player events: %w", err)
+		return fmt.Errorf("get unresolved events: %w", err)
 	}
 	found := false
 	for _, e := range events {
@@ -52,7 +76,7 @@ func (s *RadarService) ResolveEvent(ctx context.Context, playerID int, eventID i
 		}
 	}
 	if !found {
-		return fmt.Errorf("event not found")
+		return fmt.Errorf("event not found or already resolved")
 	}
 	return s.repo.ResolveEvent(ctx, eventID)
 }
@@ -66,7 +90,10 @@ func (s *RadarService) DetectFleet(ctx context.Context, req DetectFleetRequest) 
 		eventType = "espionage"
 	}
 
-	arrivalTime, _ := time.Parse(time.RFC3339, req.ArrivalTime)
+	arrivalTime, err := time.Parse(time.RFC3339, req.ArrivalTime)
+	if err != nil {
+		return fmt.Errorf("invalid arrival time: %w", err)
+	}
 
 	srcPlayerID := req.SourcePlayerID
 	fleetID := req.FleetID
@@ -74,7 +101,7 @@ func (s *RadarService) DetectFleet(ctx context.Context, req DetectFleetRequest) 
 	originSystem := req.OriginSystem
 	originPosition := req.OriginPosition
 
-	_, err := s.repo.CreateRadarEvent(ctx, RadarEvent{
+	_, err = s.repo.CreateRadarEvent(ctx, RadarEvent{
 		PlayerID:       req.TargetPlayerID,
 		EventType:      eventType,
 		SourcePlayerID: &srcPlayerID,
@@ -141,6 +168,10 @@ func (s *RadarService) EUXScan(ctx context.Context, playerID int, targetGalaxy, 
 	}
 	if eux == nil {
 		return nil, fmt.Errorf("no eu-x radar installed")
+	}
+
+	if targetGalaxy != eux.Galaxy {
+		return nil, fmt.Errorf("eu-x radar cannot scan across galaxies")
 	}
 
 	rangeLimit := eux.Level * 5

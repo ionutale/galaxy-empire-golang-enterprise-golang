@@ -36,6 +36,7 @@ type mockRepo struct {
 	combineAttempts     map[int]map[string]int
 	npcPlanets          map[int]*NPCPlanet
 	npcNextID           int
+	moonBuildCooldowns  map[string]time.Time
 }
 
 func newMockRepo() *mockRepo {
@@ -56,6 +57,7 @@ func newMockRepo() *mockRepo {
 		stargateLinks:  make(map[int]*StarGateLink),
 		missileIPMs:    make(map[int]int),
 		missileABMs:    make(map[int]int),
+		moonBuildCooldowns: make(map[string]time.Time),
 	}
 }
 
@@ -189,6 +191,22 @@ func (m *mockRepo) UpdateResources(_ context.Context, planetID, metal, crystal, 
 	p.Crystal = crystal
 	p.Gas = gas
 	p.ResourcesUpdatedAt = updatedAt
+	m.planets[planetID] = p
+	return nil
+}
+
+func (m *mockRepo) UpdateResourcesAtomically(_ context.Context, planetID, metal, crystal, gas int, expectedUpdatedAt, newUpdatedAt time.Time) error {
+	p, ok := m.planets[planetID]
+	if !ok {
+		return ErrPlanetNotFound
+	}
+	if !p.ResourcesUpdatedAt.Equal(expectedUpdatedAt) {
+		return nil // concurrent update; skip (same semantics as the real impl)
+	}
+	p.Metal = metal
+	p.Crystal = crystal
+	p.Gas = gas
+	p.ResourcesUpdatedAt = newUpdatedAt
 	m.planets[planetID] = p
 	return nil
 }
@@ -528,6 +546,31 @@ func (m *mockRepo) UpdateMoonBuildingLevel(_ context.Context, galaxy, system, po
 		}
 		m.moonBuildings[key] = append(m.moonBuildings[key], newB)
 	}
+	return nil
+}
+
+func moonBuildKey(galaxy, system, position int, buildingType string) string {
+	return fmt.Sprintf("%d:%d:%d:%s", galaxy, system, position, buildingType)
+}
+
+func (m *mockRepo) HasPendingMoonBuild(_ context.Context, galaxy, system, position int, buildingType string) (bool, error) {
+	if m.moonBuildCooldowns == nil {
+		return false, nil
+	}
+	key := moonBuildKey(galaxy, system, position, buildingType)
+	until, ok := m.moonBuildCooldowns[key]
+	if !ok {
+		return false, nil
+	}
+	return time.Now().Before(until), nil
+}
+
+func (m *mockRepo) SetMoonBuildCooldown(_ context.Context, galaxy, system, position int, buildingType string, duration time.Duration) error {
+	if m.moonBuildCooldowns == nil {
+		m.moonBuildCooldowns = make(map[string]time.Time)
+	}
+	key := moonBuildKey(galaxy, system, position, buildingType)
+	m.moonBuildCooldowns[key] = time.Now().Add(duration)
 	return nil
 }
 
@@ -1245,27 +1288,22 @@ func TestService_ProcessDeconstructCompletion_RemovesBuilding(t *testing.T) {
 		}
 	}
 
-	// Get the building level before deconstruction (should be 1)
-	buildingLevel, _ := mock.GetBuildingLevel(context.Background(), planet.ID, buildingType)
-	expectedRefundMetal, expectedRefundCrystal, expectedRefundGas := buildingCostResources(buildingType, buildingLevel-1)
-	expectedRefundMetal /= 2
-	expectedRefundCrystal /= 2
-	expectedRefundGas /= 2
-
+	// The building being deconstructed is at level 1 (seeded for free).
+	// No refund should be given for level-1 buildings (fix #110).
 	err = svc.processCompletedBuilds(context.Background(), planet.ID)
 	if err != nil {
 		t.Fatal("process builds:", err)
 	}
 
 	updatedPlanet := mock.planets[planet.ID]
-	if updatedPlanet.Metal != initialMetal+expectedRefundMetal {
-		t.Errorf("expected metal %d, got %d", initialMetal+expectedRefundMetal, updatedPlanet.Metal)
+	if updatedPlanet.Metal != initialMetal {
+		t.Errorf("expected no metal refund for level-1 building: expected %d, got %d", initialMetal, updatedPlanet.Metal)
 	}
-	if updatedPlanet.Crystal != initialCrystal+expectedRefundCrystal {
-		t.Errorf("expected crystal %d, got %d", initialCrystal+expectedRefundCrystal, updatedPlanet.Crystal)
+	if updatedPlanet.Crystal != initialCrystal {
+		t.Errorf("expected no crystal refund for level-1 building: expected %d, got %d", initialCrystal, updatedPlanet.Crystal)
 	}
-	if updatedPlanet.Gas != initialGas+expectedRefundGas {
-		t.Errorf("expected gas %d, got %d", initialGas+expectedRefundGas, updatedPlanet.Gas)
+	if updatedPlanet.Gas != initialGas {
+		t.Errorf("expected no gas refund for level-1 building: expected %d, got %d", initialGas, updatedPlanet.Gas)
 	}
 
 	updatedBuildings, _ := mock.GetBuildings(context.Background(), planet.ID)
@@ -2479,7 +2517,7 @@ func TestMoonBuildingUpgrade_Success(t *testing.T) {
 	planet.Gas = 1000000
 	mock.planets[planet.ID] = planet
 
-	err = svc.StartMoonBuildingUpgrade(context.Background(), galaxy, system, pos, "robotics_factory")
+	err = svc.StartMoonBuildingUpgrade(context.Background(), planet.UserID, galaxy, system, pos, "robotics_factory")
 	if err != nil {
 		t.Fatal("expected success, got:", err)
 	}
@@ -2509,7 +2547,7 @@ func TestMoonBuildingUpgrade_MoonBaseRequired(t *testing.T) {
 		{Type: "moon_base", Level: 0},
 	}
 
-	err = svc.StartMoonBuildingUpgrade(context.Background(), galaxy, system, pos, "robotics_factory")
+	err = svc.StartMoonBuildingUpgrade(context.Background(), planet.UserID, galaxy, system, pos, "robotics_factory")
 	if err != ErrMoonBaseRequired {
 		t.Errorf("expected ErrMoonBaseRequired, got %v", err)
 	}
@@ -2536,7 +2574,7 @@ func TestMoonBuildingUpgrade_InsufficientResources(t *testing.T) {
 	planet.Gas = 0
 	mock.planets[planet.ID] = planet
 
-	err = svc.StartMoonBuildingUpgrade(context.Background(), galaxy, system, pos, "robotics_factory")
+	err = svc.StartMoonBuildingUpgrade(context.Background(), planet.UserID, galaxy, system, pos, "robotics_factory")
 	if err != ErrInsufficientResources {
 		t.Errorf("expected ErrInsufficientResources, got %v", err)
 	}
@@ -2559,7 +2597,7 @@ func TestMoonBuildingUpgrade_WormholePrereqs(t *testing.T) {
 		{Type: "robotics_factory", Level: 2},
 	}
 
-	err = svc.StartMoonBuildingUpgrade(context.Background(), galaxy, system, pos, "wormhole_generator")
+	err = svc.StartMoonBuildingUpgrade(context.Background(), planet.UserID, galaxy, system, pos, "wormhole_generator")
 	if err != ErrPrerequisitesNotMet {
 		t.Errorf("expected ErrPrerequisitesNotMet, got %v", err)
 	}
@@ -2568,6 +2606,15 @@ func TestMoonBuildingUpgrade_WormholePrereqs(t *testing.T) {
 func TestWormholeLink_Success(t *testing.T) {
 	mock := newMockRepo()
 	svc := NewPlanetService(mock)
+
+	const ownerID = 400
+	// Place a planet at the source coords so the ownership check passes.
+	srcPlanet := Planet{
+		ID: 9901, UserID: ownerID,
+		Galaxy: 1, System: 1, Position: 1,
+		ResourcesUpdatedAt: time.Now(),
+	}
+	mock.planets[srcPlanet.ID] = srcPlanet
 
 	now := time.Now()
 	wh1 := &WormholeEntry{
@@ -2582,7 +2629,7 @@ func TestWormholeLink_Success(t *testing.T) {
 	mock.wormholes[moonKey(1, 1, 2)] = wh2
 	_ = now
 
-	err := svc.LinkWormholes(context.Background(), 1, 1, 1, 1, 1, 2)
+	err := svc.LinkWormholes(context.Background(), ownerID, 1, 1, 1, 1, 1, 2)
 	if err != nil {
 		t.Fatal("expected success, got:", err)
 	}
@@ -2602,7 +2649,17 @@ func TestWormholeLink_MissingGenerator(t *testing.T) {
 	mock := newMockRepo()
 	svc := NewPlanetService(mock)
 
-	err := svc.LinkWormholes(context.Background(), 1, 1, 1, 1, 1, 2)
+	const ownerID = 401
+	// Place a planet at the source coords so the ownership check passes and
+	// we reach the wormhole lookup (which returns ErrWormholeNotFound).
+	srcPlanet := Planet{
+		ID: 9902, UserID: ownerID,
+		Galaxy: 1, System: 1, Position: 1,
+		ResourcesUpdatedAt: time.Now(),
+	}
+	mock.planets[srcPlanet.ID] = srcPlanet
+
+	err := svc.LinkWormholes(context.Background(), ownerID, 1, 1, 1, 1, 1, 2)
 	if err != ErrWormholeNotFound {
 		t.Errorf("expected ErrWormholeNotFound, got %v", err)
 	}
@@ -2914,6 +2971,13 @@ func TestHandler_LinkWormholes(t *testing.T) {
 	svc := NewPlanetService(mock)
 	h := NewHandler(svc)
 
+	const ownerID = 500
+	// Service checks that the source planet belongs to the calling user.
+	mock.planets[9903] = Planet{
+		ID: 9903, UserID: ownerID,
+		Galaxy: 1, System: 1, Position: 1,
+		ResourcesUpdatedAt: time.Now(),
+	}
 	mock.wormholes[moonKey(1, 1, 1)] = &WormholeEntry{
 		MoonGalaxy: 1, MoonSystem: 1, MoonPos: 1, Level: 1,
 	}
@@ -2923,6 +2987,7 @@ func TestHandler_LinkWormholes(t *testing.T) {
 
 	body := `{"source_galaxy":1,"source_system":1,"source_position":1,"target_galaxy":1,"target_system":1,"target_position":2}`
 	req := httptest.NewRequest("POST", "/api/wormhole/link", strings.NewReader(body))
+	req.Header.Set("X-User-ID", fmt.Sprintf("%d", ownerID))
 	w := httptest.NewRecorder()
 	h.LinkWormholes(w, req)
 
@@ -3154,6 +3219,63 @@ func (m *mockRepo) RespawnNPCPlanet(_ context.Context, npcPlanetID int) error {
 			break
 		}
 	}
+	return nil
+}
+
+func (m *mockRepo) AtomicDeductResource(_ context.Context, planetID int, resource string, amount int) error {
+	p, ok := m.planets[planetID]
+	if !ok {
+		return ErrPlanetNotFound
+	}
+	switch resource {
+	case "metal":
+		if p.Metal < amount {
+			return ErrInsufficientResources
+		}
+		p.Metal -= amount
+	case "crystal":
+		if p.Crystal < amount {
+			return ErrInsufficientResources
+		}
+		p.Crystal -= amount
+	case "gas":
+		if p.Gas < amount {
+			return ErrInsufficientResources
+		}
+		p.Gas -= amount
+	}
+	m.planets[planetID] = p
+	return nil
+}
+
+func (m *mockRepo) AtomicAddResource(_ context.Context, planetID int, resource string, amount int) error {
+	p, ok := m.planets[planetID]
+	if !ok {
+		return ErrPlanetNotFound
+	}
+	switch resource {
+	case "metal":
+		p.Metal += amount
+	case "crystal":
+		p.Crystal += amount
+	case "gas":
+		p.Gas += amount
+	}
+	m.planets[planetID] = p
+	return nil
+}
+
+func (m *mockRepo) SpeedUpBuildQueue(_ context.Context, planetID, seconds int) error {
+	q := m.queue[planetID]
+	now := time.Now()
+	for i, e := range q {
+		newTime := e.CompletesAt.Add(-time.Duration(seconds) * time.Second)
+		if newTime.Before(now) {
+			newTime = now
+		}
+		q[i].CompletesAt = newTime
+	}
+	m.queue[planetID] = q
 	return nil
 }
 

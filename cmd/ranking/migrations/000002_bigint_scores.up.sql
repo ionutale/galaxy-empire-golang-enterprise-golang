@@ -1,4 +1,4 @@
-ALTER TABLE ranking.rankings
+ALTER TABLE ranking.player_scores
     ALTER COLUMN total_score TYPE BIGINT,
     ALTER COLUMN buildings_score TYPE BIGINT,
     ALTER COLUMN research_score TYPE BIGINT,

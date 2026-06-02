@@ -30,6 +30,7 @@
     if (chatSocket) { chatSocket.close(); chatSocket = null }
     if (notificationSocket) { notificationSocket.close(); notificationSocket = null }
     if (pollInterval) clearInterval(pollInterval)
+    pollingStarted = false
     token = null; user = null; planet = null
     notifications = []; notificationUnread = 0
     chatMessages = []; chatView = null; messagingView = null
@@ -39,7 +40,10 @@
   }
 
   let pollInterval
+  let loadingPlanet = false
   async function loadPlanet() {
+    if (loadingPlanet) return
+    loadingPlanet = true
     try {
       const res = await fetch('/api/planet/mine', {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -55,7 +59,9 @@
         planet.credits = credData.balance || 0
       }
       error = ''
-    } catch (e) { error = e.message }
+    } catch (e) { error = e.message } finally {
+      loadingPlanet = false
+    }
   }
 
   function startPolling() {
@@ -77,7 +83,8 @@
     error = ''
   }
 
-  $: if (token && !user) startPolling()
+  let pollingStarted = false
+  $: if (token && !user && !pollingStarted) { pollingStarted = true; startPolling() }
   $: if (!token) stopPolling()
 
   function planetTypeLabel(type) {
@@ -530,6 +537,7 @@
   }
 
   async function selectGalaxy(id) {
+    selectedGalaxy = id
     galaxyPage = 1
     fleetView = null
     galaxyData = await loadSystems(id, galaxyPage)
@@ -700,9 +708,11 @@
     buildQuantities = buildQuantities
   }
 
+  const MAX_BUILD_QUANTITY = 10000
+
   function maxAfford(ship) {
     if (!planet) return 1
-    let max = 999999999
+    let max = MAX_BUILD_QUANTITY
     if (ship.metal > 0) max = Math.min(max, Math.floor(planet.metal / ship.metal))
     if (ship.crystal > 0) max = Math.min(max, Math.floor(planet.crystal / ship.crystal))
     if (ship.gas > 0) max = Math.min(max, Math.floor(planet.gas / ship.gas))
@@ -716,7 +726,7 @@
 
   function maxAffordDefense(def) {
     if (!planet) return 1
-    let max = 999999999
+    let max = MAX_BUILD_QUANTITY
     if (def.metal > 0) max = Math.min(max, Math.floor(planet.metal / def.metal))
     if (def.crystal > 0) max = Math.min(max, Math.floor(planet.crystal / def.crystal))
     if (def.gas > 0) max = Math.min(max, Math.floor(planet.gas / def.gas))
@@ -847,7 +857,8 @@
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (!res.ok) throw new Error('Failed to load fleets')
-      fleetData = await res.json()
+      const raw = await res.json()
+      fleetData = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.fleets) ? raw.fleets : [])
       dispatchForm.shipQuantities = {}
       const shipRes = await fetch('/api/shipyard', {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -972,6 +983,7 @@
       } catch (err) { /* ignore */ }
     }
     notificationSocket.onerror = () => {
+      notificationConnected = false
       notificationSocket = null
       setTimeout(() => { if (token && !notificationSocket) connectNotificationSSE() }, 5000)
     }
@@ -1094,9 +1106,11 @@
     return `${s}s`
   }
 
+  let eventTick = 0
+
   function startEventCountdown() {
     if (eventCountdownInterval) clearInterval(eventCountdownInterval)
-    eventCountdownInterval = setInterval(() => { events = events }, 1000)
+    eventCountdownInterval = setInterval(() => { eventTick++ }, 1000)
   }
 
   function stopEventCountdown() {
@@ -1538,7 +1552,19 @@
               <input bind:value={adminSearchQuery} placeholder="Email" class="form-input" />
               <button class="btn-admin" on:click={adminSearchUsers}>Search</button>
               {#if adminSearchResult}
-                <pre class="admin-result">{JSON.stringify(adminSearchResult, null, 2)}</pre>
+                <table class="admin-table">
+                  <thead><tr><th>ID</th><th>Username</th><th>Banned</th><th>Created</th></tr></thead>
+                  <tbody>
+                    {#each adminSearchResult.users || [] as u}
+                      <tr>
+                        <td>{u.id}</td>
+                        <td>{u.username || '—'}</td>
+                        <td>{u.is_banned ? 'Yes' : 'No'}</td>
+                        <td>{new Date(u.created_at).toLocaleDateString()}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
               {/if}
             </div>
             <div class="admin-card">
@@ -2006,7 +2032,7 @@
                   <div class="quest-desc">{q.definition.description}</div>
                   <div class="quest-progress">
                     <div class="quest-bar-bg">
-                      <div class="quest-bar-fill" style="width: {Math.min(100, q.progress.progress_current / q.progress.progress_target * 100)}%"></div>
+                      <div class="quest-bar-fill" style="width: {q.progress.progress_target > 0 ? Math.min(100, q.progress.progress_current / q.progress.progress_target * 100) : (q.progress.progress_current > 0 ? 100 : 0)}%"></div>
                     </div>
                     <span class="quest-progress-text">{q.progress.progress_current}/{q.progress.progress_target}</span>
                   </div>
@@ -2049,10 +2075,10 @@
                   <div class="event-timer">
                     {#if ev.status === 'active'}
                       <span class="timer-label">Ends in: </span>
-                      <span class="timer-value">{formatCountdown(ev.ends_at)}</span>
+                      <span class="timer-value">{eventTick, formatCountdown(ev.ends_at)}</span>
                     {:else if ev.status === 'upcoming'}
                       <span class="timer-label">Starts in: </span>
-                      <span class="timer-value">{formatCountdown(ev.starts_at)}</span>
+                      <span class="timer-value">{eventTick, formatCountdown(ev.starts_at)}</span>
                     {:else}
                       <span class="timer-label">Ended</span>
                     {/if}
@@ -2083,8 +2109,8 @@
                 <button class="btn-action btn-cancel" on:click={() => mergeIds = []}>Cancel</button>
               </div>
             {/if}
-            {#if fleetData.fleets && fleetData.fleets.length > 0}
-              {#each fleetData.fleets as fleet}
+            {#if fleetData && fleetData.length > 0}
+              {#each fleetData as fleet}
                 <div class="fleet-card">
                   <div class="fleet-header">
                     <span class="fleet-id">Fleet #{fleet.id}</span>

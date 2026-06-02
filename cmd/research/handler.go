@@ -76,6 +76,9 @@ func (h *Handler) StartResearch(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrAlreadyResearching):
 			code = http.StatusConflict
 			msg = "already researching this tech"
+		case errors.Is(err, ErrResearchInProgress):
+			code = http.StatusConflict
+			msg = "research already in progress"
 		}
 		writeJSON(w, code, map[string]string{"error": msg})
 		return

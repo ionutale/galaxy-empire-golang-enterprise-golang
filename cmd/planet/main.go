@@ -590,5 +590,18 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS planet.moon_build_cooldowns (
+			moon_galaxy INT NOT NULL,
+			moon_system INT NOT NULL,
+			moon_position INT NOT NULL,
+			building_type VARCHAR(50) NOT NULL,
+			locked_until TIMESTAMPTZ NOT NULL,
+			PRIMARY KEY (moon_galaxy, moon_system, moon_position, building_type)
+		);
+	`); err != nil {
+		return err
+	}
+
 	return nil
 }

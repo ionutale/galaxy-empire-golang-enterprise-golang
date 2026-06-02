@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -16,6 +17,27 @@ type Handler struct {
 
 func NewHandler(service *AdminService) *Handler {
 	return &Handler{service: service}
+}
+
+// internalSecretMiddleware rejects any request that does not carry the correct
+// X-Internal-Secret header (#21). This prevents direct port access from
+// bypassing the gateway's JWT validation — the gateway sets this header on
+// every forwarded request, and the value is shared via ADMIN_INTERNAL_SECRET.
+func internalSecretMiddleware(next http.Handler) http.Handler {
+	secret := os.Getenv("ADMIN_INTERNAL_SECRET")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if secret == "" {
+			// Secret is not configured — fail closed to avoid silent bypass.
+			slog.Error("ADMIN_INTERNAL_SECRET is not set; rejecting all admin requests")
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "service misconfigured"})
+			return
+		}
+		if r.Header.Get("X-Internal-Secret") != secret {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (h *Handler) adminOnly(next http.HandlerFunc) http.HandlerFunc {
@@ -61,9 +83,20 @@ func (h *Handler) SearchUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Strip sensitive fields (email, tokens) before sending to the caller.
+	sanitized := make([]UserSearchResponse, len(users))
+	for i, u := range users {
+		sanitized[i] = UserSearchResponse{
+			ID:        u.ID,
+			Username:  u.Username,
+			IsBanned:  u.IsBanned,
+			CreatedAt: u.CreatedAt,
+		}
+	}
+
 	totalPages := (total + limit - 1) / limit
 	writeJSON(w, http.StatusOK, map[string]any{
-		"users":       users,
+		"users":       sanitized,
 		"total":       total,
 		"page":        page,
 		"total_pages": totalPages,
@@ -247,10 +280,11 @@ func (h *Handler) CreateEvent(w http.ResponseWriter, r *http.Request) {
 		slog.Error("create event failed", "error", err)
 		code := http.StatusInternalServerError
 		msg := "internal error"
-		switch err.Error() {
-		case "name and event_type are required",
-			"starts_at and ends_at are required",
-			"ends_at must be after starts_at":
+		switch {
+		case err.Error() == "name and event_type are required",
+			err.Error() == "starts_at and ends_at are required",
+			err.Error() == "ends_at must be after starts_at",
+			errors.Is(err, ErrInvalidEventType):
 			code = http.StatusBadRequest
 			msg = err.Error()
 		}

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
 
 jobs:
   vet:
@@ -15,18 +15,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache: true
       - name: Go vet
         run: go vet ./cmd/...
 
   test:
     name: Go Test
     runs-on: ubuntu-latest
+    needs: vet
     services:
       postgres:
         image: postgres:16-alpine
         env:
           POSTGRES_USER: galaxy
-          POSTGRES_PASSWORD: galaxy_dev
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'galaxy_test' }}
           POSTGRES_DB: galaxy_empire
         ports:
           - 5432:5432
@@ -40,19 +42,22 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache: true
       - name: Run tests
-        run: go test ./cmd/...
+        run: go test -race -timeout 10m ./cmd/...
         env:
-          DATABASE_URL: postgres://galaxy:galaxy_dev@localhost:5432/galaxy_empire?sslmode=disable
+          DATABASE_URL: postgres://galaxy:galaxy_test@localhost:5432/galaxy_empire?sslmode=disable
 
   build:
     name: Go Build
     runs-on: ubuntu-latest
+    needs: vet
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache: true
       - name: Build all services
         run: |
           for dir in cmd/*/; do

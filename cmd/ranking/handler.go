@@ -27,6 +27,12 @@ func (h *Handler) GetTop(w http.ResponseWriter, r *http.Request) {
 			limit = v
 		}
 	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
 
 	offset := 0
 	if offsetStr != "" {

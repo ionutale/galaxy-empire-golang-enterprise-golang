@@ -48,7 +48,10 @@ func main() {
 		w.Write([]byte(`{"status":"ok","service":"admin"}`))
 	})
 
+	// Fix #21: all admin routes require a valid X-Internal-Secret header so that
+	// direct TCP access to port 8096 cannot bypass the gateway JWT check.
 	r.Route("/api/admin", func(r chi.Router) {
+		r.Use(internalSecretMiddleware)
 		r.Get("/users", h.adminOnly(h.SearchUsers))
 		r.Get("/planets", h.adminOnly(h.GetPlanets))
 		r.Post("/planet/{id}/resources", h.adminOnly(h.OverrideResources))

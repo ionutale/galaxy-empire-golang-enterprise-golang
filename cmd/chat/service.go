@@ -22,14 +22,16 @@ type jwtClaims struct {
 }
 
 type SubscriberManager struct {
-	sync.Mutex
+	sync.RWMutex
 	listeners []chan Message
 }
 
 func (sm *SubscriberManager) Broadcast(msg Message) {
-	sm.Lock()
-	defer sm.Unlock()
-	for _, ch := range sm.listeners {
+	sm.RLock()
+	snapshot := make([]chan Message, len(sm.listeners))
+	copy(snapshot, sm.listeners)
+	sm.RUnlock()
+	for _, ch := range snapshot {
 		select {
 		case ch <- msg:
 		default:

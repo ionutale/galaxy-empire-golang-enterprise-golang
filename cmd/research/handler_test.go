@@ -135,7 +135,7 @@ func TestHandler_StartResearch_AlreadyResearching(t *testing.T) {
 
 	body := `{"planet_id":1}`
 	req1 := httptest.NewRequest("POST", "/api/research/energy_tech/start", strings.NewReader(body))
-	req1.Header.Set("X-User-ID", "2")
+	req1.Header.Set("X-User-ID", "1")
 	req1.Header.Set("Content-Type", "application/json")
 	rec1 := httptest.NewRecorder()
 	router.ServeHTTP(rec1, req1)
@@ -144,7 +144,7 @@ func TestHandler_StartResearch_AlreadyResearching(t *testing.T) {
 	}
 
 	req2 := httptest.NewRequest("POST", "/api/research/energy_tech/start", strings.NewReader(body))
-	req2.Header.Set("X-User-ID", "2")
+	req2.Header.Set("X-User-ID", "1")
 	req2.Header.Set("Content-Type", "application/json")
 	rec2 := httptest.NewRecorder()
 	router.ServeHTTP(rec2, req2)
@@ -169,7 +169,7 @@ func TestHandler_CancelResearch_Success(t *testing.T) {
 
 	body := `{"planet_id":1}`
 	startReq := httptest.NewRequest("POST", "/api/research/energy_tech/start", strings.NewReader(body))
-	startReq.Header.Set("X-User-ID", "3")
+	startReq.Header.Set("X-User-ID", "1")
 	startReq.Header.Set("Content-Type", "application/json")
 	startRec := httptest.NewRecorder()
 	router.ServeHTTP(startRec, startReq)
@@ -178,7 +178,7 @@ func TestHandler_CancelResearch_Success(t *testing.T) {
 	}
 
 	cancelReq := httptest.NewRequest("POST", "/api/research/energy_tech/cancel", nil)
-	cancelReq.Header.Set("X-User-ID", "3")
+	cancelReq.Header.Set("X-User-ID", "1")
 	cancelRec := httptest.NewRecorder()
 	router.ServeHTTP(cancelRec, cancelReq)
 	if cancelRec.Code != http.StatusOK {
@@ -211,7 +211,7 @@ func TestListQueue_Success(t *testing.T) {
 
 	body := `{"planet_id":1}`
 	startReq := httptest.NewRequest("POST", "/api/research/energy_tech/start", strings.NewReader(body))
-	startReq.Header.Set("X-User-ID", "4")
+	startReq.Header.Set("X-User-ID", "1")
 	startReq.Header.Set("Content-Type", "application/json")
 	startRec := httptest.NewRecorder()
 	router.ServeHTTP(startRec, startReq)
@@ -220,7 +220,7 @@ func TestListQueue_Success(t *testing.T) {
 	}
 
 	queueReq := httptest.NewRequest("GET", "/api/research/queue", nil)
-	queueReq.Header.Set("X-User-ID", "4")
+	queueReq.Header.Set("X-User-ID", "1")
 	queueRec := httptest.NewRecorder()
 	router.ServeHTTP(queueRec, queueReq)
 	if queueRec.Code != http.StatusOK {

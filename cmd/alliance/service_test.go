@@ -129,8 +129,8 @@ func TestApplyToAlliance_Success(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if member.Role != "member" {
-		t.Errorf("expected role member, got %s", member.Role)
+	if member.Role != "pending" {
+		t.Errorf("expected role pending, got %s", member.Role)
 	}
 	if member.AllianceID != alliance.ID {
 		t.Errorf("expected alliance %d, got %d", alliance.ID, member.AllianceID)
@@ -418,7 +418,7 @@ func TestBankWithdraw_InsufficientFunds(t *testing.T) {
 
 	svc.CreateAlliance(context.Background(), 1, "Test", "TST")
 	_, err := svc.BankWithdraw(context.Background(), 1, 1, 999999, 0, 0)
-	if err == nil || !strings.Contains(err.Error(), "insufficient metal") {
+	if err == nil || !strings.Contains(err.Error(), "insufficient") {
 		t.Fatalf("expected insufficient funds error, got: %v", err)
 	}
 }

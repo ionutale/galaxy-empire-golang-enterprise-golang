@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -80,7 +81,10 @@ func (r *PostgresRepository) ListPlayerFleets(ctx context.Context, playerID int)
 		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID, &f.CargoMetal, &f.CargoCrystal, &f.CargoGas); err != nil {
 			return nil, fmt.Errorf("scan fleet: %w", err)
 		}
-		json.Unmarshal(shipsJSON, &f.Ships)
+		if err := json.Unmarshal(shipsJSON, &f.Ships); err != nil {
+			slog.Error("fleet: unmarshal ships JSON", "fleet_id", f.ID, "error", err)
+			f.Ships = make(map[string]int)
+		}
 		if arrivesAt != nil {
 			f.ArrivesAt = *arrivesAt
 		}
@@ -120,7 +124,10 @@ func (r *PostgresRepository) GetFleetByID(ctx context.Context, fleetID int) (Fle
 	if err != nil {
 		return Fleet{}, err
 	}
-	json.Unmarshal(shipsJSON, &f.Ships)
+	if err := json.Unmarshal(shipsJSON, &f.Ships); err != nil {
+		slog.Error("fleet: unmarshal ships JSON", "fleet_id", f.ID, "error", err)
+		f.Ships = make(map[string]int)
+	}
 	if arrivesAt != nil {
 		f.ArrivesAt = *arrivesAt
 	}
@@ -133,8 +140,11 @@ func (r *PostgresRepository) DeleteFleet(ctx context.Context, fleetID int) error
 }
 
 func (r *PostgresRepository) UpdateFleetShips(ctx context.Context, fleetID int, ships map[string]int) error {
-	shipsJSON, _ := json.Marshal(ships)
-	_, err := r.pool.Exec(ctx, `UPDATE fleet.fleets SET ships = $1 WHERE id = $2`, shipsJSON, fleetID)
+	shipsJSON, err := json.Marshal(ships)
+	if err != nil {
+		return fmt.Errorf("marshal ships: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, `UPDATE fleet.fleets SET ships = $1 WHERE id = $2`, shipsJSON, fleetID)
 	return err
 }
 
@@ -193,7 +203,10 @@ func (r *PostgresRepository) GetArrivedFleets(ctx context.Context) ([]Fleet, err
 		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID, &f.CargoMetal, &f.CargoCrystal, &f.CargoGas); err != nil {
 			return nil, fmt.Errorf("scan fleet: %w", err)
 		}
-		json.Unmarshal(shipsJSON, &f.Ships)
+		if err := json.Unmarshal(shipsJSON, &f.Ships); err != nil {
+			slog.Error("fleet: unmarshal ships JSON", "fleet_id", f.ID, "error", err)
+			f.Ships = make(map[string]int)
+		}
 		if arrivesAt != nil {
 			f.ArrivesAt = *arrivesAt
 		}
@@ -221,7 +234,10 @@ func (r *PostgresRepository) GetACSGroupFleets(ctx context.Context, allianceGrou
 		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID, &f.CargoMetal, &f.CargoCrystal, &f.CargoGas); err != nil {
 			return nil, fmt.Errorf("scan fleet: %w", err)
 		}
-		json.Unmarshal(shipsJSON, &f.Ships)
+		if err := json.Unmarshal(shipsJSON, &f.Ships); err != nil {
+			slog.Error("fleet: unmarshal ships JSON", "fleet_id", f.ID, "error", err)
+			f.Ships = make(map[string]int)
+		}
 		if arrivesAt != nil {
 			f.ArrivesAt = *arrivesAt
 		}
@@ -250,7 +266,10 @@ func (r *PostgresRepository) GetACSDefendFleets(ctx context.Context, targetGalax
 		if err := rows.Scan(&f.ID, &f.PlayerID, &f.OriginPlanetID, &f.TargetGalaxy, &f.TargetSystem, &f.TargetPosition, &f.Mission, &f.Status, &f.SpeedPct, &shipsJSON, &arrivesAt, &f.CreatedAt, &f.AllianceGroupID, &f.CargoMetal, &f.CargoCrystal, &f.CargoGas); err != nil {
 			return nil, fmt.Errorf("scan fleet: %w", err)
 		}
-		json.Unmarshal(shipsJSON, &f.Ships)
+		if err := json.Unmarshal(shipsJSON, &f.Ships); err != nil {
+			slog.Error("fleet: unmarshal ships JSON", "fleet_id", f.ID, "error", err)
+			f.Ships = make(map[string]int)
+		}
 		if arrivesAt != nil {
 			f.ArrivesAt = *arrivesAt
 		}

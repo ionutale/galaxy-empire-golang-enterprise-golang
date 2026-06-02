@@ -27,32 +27,53 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 }
 
 func (r *PostgresRepository) CreateCombatReport(ctx context.Context, report CombatReport) (int, error) {
-	shipsBeforeJSON, _ := json.Marshal(struct {
+	shipsBeforeJSON, err := json.Marshal(struct {
 		Attacker map[string]int `json:"attacker"`
 		Defender map[string]int `json:"defender"`
 	}{
 		Attacker: report.AttackerShipsBefore,
 		Defender: report.DefenderShipsBefore,
 	})
+	if err != nil {
+		return 0, fmt.Errorf("marshal ships before: %w", err)
+	}
 
-	shipsAfterJSON, _ := json.Marshal(struct {
+	shipsAfterJSON, err := json.Marshal(struct {
 		Attacker map[string]int `json:"attacker"`
 		Defender map[string]int `json:"defender"`
 	}{
 		Attacker: report.AttackerShipsAfter,
 		Defender: report.DefenderShipsAfter,
 	})
+	if err != nil {
+		return 0, fmt.Errorf("marshal ships after: %w", err)
+	}
 
-	roundsJSON, _ := json.Marshal(report.Rounds)
-	lootJSON, _ := json.Marshal(report.AttackerLoot)
-	lostResJSON, _ := json.Marshal(report.DefenderLostRes)
+	roundsJSON, err := json.Marshal(report.Rounds)
+	if err != nil {
+		return 0, fmt.Errorf("marshal rounds: %w", err)
+	}
+
+	lootJSON, err := json.Marshal(report.AttackerLoot)
+	if err != nil {
+		return 0, fmt.Errorf("marshal attacker loot: %w", err)
+	}
+
+	lostResJSON, err := json.Marshal(report.DefenderLostRes)
+	if err != nil {
+		return 0, fmt.Errorf("marshal defender lost resources: %w", err)
+	}
+
 	var missileResultJSON []byte
 	if report.MissileResult != nil {
-		missileResultJSON, _ = json.Marshal(report.MissileResult)
+		missileResultJSON, err = json.Marshal(report.MissileResult)
+		if err != nil {
+			return 0, fmt.Errorf("marshal missile result: %w", err)
+		}
 	}
 
 	var id int
-	err := r.pool.QueryRow(ctx, `
+	err = r.pool.QueryRow(ctx, `
 		INSERT INTO combat.combat_reports
 			(attacker_player_id, defender_player_id, target_galaxy, target_system, target_position,
 			 attacker_ships_before, defender_ships_before, attacker_ships_after, defender_ships_after,

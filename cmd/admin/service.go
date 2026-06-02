@@ -9,6 +9,10 @@ import (
 var ErrNotAdmin = errors.New("not an admin")
 var ErrPlanetNotFound = errors.New("planet not found")
 var ErrUserNotFound = errors.New("user not found")
+var ErrInvalidEventType = errors.New("invalid event type")
+
+// maxAdminGrant is the upper bound for a single admin DM or credits grant (#168).
+const maxAdminGrant = 1_000_000
 
 type AdminService struct {
 	repo Repository
@@ -104,8 +108,9 @@ func (s *AdminService) GrantDM(ctx context.Context, playerID, amount int, reason
 	if reason == "" {
 		return fmt.Errorf("reason is required")
 	}
-	if amount <= 0 || amount > 1_000_000 {
-		return fmt.Errorf("amount must be between 1 and 1000000")
+	// Fix #168: enforce upper bound to prevent runaway grants.
+	if amount <= 0 || amount > maxAdminGrant {
+		return fmt.Errorf("amount must be between 1 and %d", maxAdminGrant)
 	}
 	return s.repo.AddDM(ctx, playerID, amount)
 }
@@ -114,8 +119,9 @@ func (s *AdminService) GrantCredits(ctx context.Context, playerID, amount int, r
 	if reason == "" {
 		return fmt.Errorf("reason is required")
 	}
-	if amount <= 0 || amount > 10_000_000 {
-		return fmt.Errorf("amount must be between 1 and 10000000")
+	// Fix #168: enforce upper bound to prevent runaway grants.
+	if amount <= 0 || amount > maxAdminGrant {
+		return fmt.Errorf("amount must be between 1 and %d", maxAdminGrant)
 	}
 	return s.repo.AddCredits(ctx, playerID, amount)
 }
@@ -134,9 +140,21 @@ func (s *AdminService) SendGMMessage(ctx context.Context, playerID int, subject,
 	return s.repo.CreateNotification(ctx, playerID, "system", subject, message)
 }
 
+// validEventTypes is the authoritative list of allowed event types (#170).
+var validEventTypes = map[string]bool{
+	"bonus_resources":   true,
+	"double_production": true,
+	"tournament":        true,
+	"special":           true,
+}
+
 func (s *AdminService) CreateEvent(ctx context.Context, req EventCreateRequest) error {
 	if req.Name == "" || req.EventType == "" {
 		return fmt.Errorf("name and event_type are required")
+	}
+	// Fix #170: validate event type against the known set.
+	if !validEventTypes[req.EventType] {
+		return fmt.Errorf("%w: %s", ErrInvalidEventType, req.EventType)
 	}
 	if req.StartsAt.IsZero() || req.EndsAt.IsZero() {
 		return fmt.Errorf("starts_at and ends_at are required")

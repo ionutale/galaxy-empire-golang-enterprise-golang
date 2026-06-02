@@ -152,6 +152,9 @@ func (h *Handler) StartUpgrade(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrAlreadyQueued):
 			code = http.StatusConflict
 			msg = "building already in queue"
+		case errors.Is(err, ErrBuildAlreadyInProgress):
+			code = http.StatusConflict
+			msg = "building already in queue"
 		case errors.Is(err, ErrInvalidBuilding):
 			code = http.StatusBadRequest
 			msg = "invalid building type"
@@ -336,8 +339,18 @@ func (h *Handler) ListShips(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shipyardLevel, _ := h.service.repo.GetBuildingLevel(r.Context(), planet.ID, "shipyard")
-	playerShips, _ := h.service.repo.GetPlayerShips(r.Context(), planet.ID)
+	shipyardLevel, err := h.service.repo.GetBuildingLevel(r.Context(), planet.ID, "shipyard")
+	if err != nil && !errors.Is(err, ErrInvalidBuilding) {
+		slog.Error("list ships: get shipyard level", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	playerShips, err := h.service.repo.GetPlayerShips(r.Context(), planet.ID)
+	if err != nil {
+		slog.Error("list ships: get player ships", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
 
 	ships := make([]ShipResponse, len(Ships))
 	for i, cfg := range Ships {
@@ -430,8 +443,18 @@ func (h *Handler) ListDefenses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shipyardLevel, _ := h.service.repo.GetBuildingLevel(r.Context(), planet.ID, "shipyard")
-	playerDefenses, _ := h.service.repo.GetPlayerDefenses(r.Context(), planet.ID)
+	shipyardLevel, err := h.service.repo.GetBuildingLevel(r.Context(), planet.ID, "shipyard")
+	if err != nil && !errors.Is(err, ErrInvalidBuilding) {
+		slog.Error("list defenses: get shipyard level", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	playerDefenses, err := h.service.repo.GetPlayerDefenses(r.Context(), planet.ID)
+	if err != nil {
+		slog.Error("list defenses: get player defenses", "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
 
 	defenses := make([]DefenseResponse, len(Defenses))
 	for i, cfg := range Defenses {
@@ -548,10 +571,10 @@ func (h *Handler) BuildIPM(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrInsufficientResources):
 			msg = "insufficient resources"
 			code = http.StatusBadRequest
-		case errors.Is(err, ErrMissileSiloRequired) || strings.Contains(err.Error(), "missile silo"):
+		case errors.Is(err, ErrMissileSiloRequired) || (err != nil && strings.Contains(err.Error(), "missile silo")):
 			msg = err.Error()
 			code = http.StatusBadRequest
-		case strings.Contains(err.Error(), "silo capacity"):
+		case err != nil && strings.Contains(err.Error(), "silo capacity"):
 			msg = err.Error()
 			code = http.StatusBadRequest
 		}
@@ -605,10 +628,10 @@ func (h *Handler) BuildABM(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrInsufficientResources):
 			msg = "insufficient resources"
 			code = http.StatusBadRequest
-		case strings.Contains(err.Error(), "missile silo"):
+		case err != nil && strings.Contains(err.Error(), "missile silo"):
 			msg = err.Error()
 			code = http.StatusBadRequest
-		case strings.Contains(err.Error(), "silo capacity"):
+		case err != nil && strings.Contains(err.Error(), "silo capacity"):
 			msg = err.Error()
 			code = http.StatusBadRequest
 		}
@@ -690,10 +713,10 @@ func (h *Handler) LaunchIPMs(w http.ResponseWriter, r *http.Request) {
 		msg := "internal error"
 		code := http.StatusInternalServerError
 		switch {
-		case strings.Contains(err.Error(), "insufficient IPMs"):
+		case err != nil && strings.Contains(err.Error(), "insufficient IPMs"):
 			msg = err.Error()
 			code = http.StatusBadRequest
-		case strings.Contains(err.Error(), "silo level"):
+		case err != nil && strings.Contains(err.Error(), "silo level"):
 			msg = err.Error()
 			code = http.StatusBadRequest
 		}
@@ -1288,7 +1311,7 @@ func (h *Handler) InternalWormholeInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	linkedCoords := map[string]any{}
-	if wEntry.LinkedGalaxy != nil {
+	if wEntry.LinkedGalaxy != nil && wEntry.LinkedSystem != nil && wEntry.LinkedPosition != nil {
 		linkedCoords = map[string]any{
 			"galaxy":   *wEntry.LinkedGalaxy,
 			"system":   *wEntry.LinkedSystem,

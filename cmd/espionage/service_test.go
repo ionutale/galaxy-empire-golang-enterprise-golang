@@ -11,11 +11,26 @@ import (
 func TestSendProbe_EmptyTarget(t *testing.T) {
 	planetSvc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/internal/planet/coords":
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]int{"galaxy": 9, "system": 9, "position": 9})
 		case "/internal/ships/deduct":
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 		case "/internal/planet/info":
-			w.WriteHeader(http.StatusNotFound)
+			// ownership check uses coords 9/9/9, target check uses 1/1/1
+			var req struct {
+				Galaxy   int `json:"galaxy"`
+				System   int `json:"system"`
+				Position int `json:"position"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			if req.Galaxy == 9 {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]int{"player_id": 1})
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -37,16 +52,33 @@ func TestSendProbe_EmptyTarget(t *testing.T) {
 func TestSendProbe_DetailLevel(t *testing.T) {
 	planetSvc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/internal/planet/coords":
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]int{"galaxy": 9, "system": 9, "position": 9})
 		case "/internal/ships/deduct":
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-		case "/internal/planet/info":
+		case "/internal/player/tech-level":
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(PlanetInfo{
-				PlanetID: 10, PlayerID: 2,
-				Metal: 50000, Crystal: 30000, Gas: 15000,
-				Ships: map[string]int{"cargo": 20, "light_fighter": 10},
-			})
+			json.NewEncoder(w).Encode(map[string]int{"level": 5})
+		case "/internal/planet/info":
+			var req struct {
+				Galaxy   int `json:"galaxy"`
+				System   int `json:"system"`
+				Position int `json:"position"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			if req.Galaxy == 9 {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]int{"player_id": 1})
+			} else {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(PlanetInfo{
+					PlanetID: 10, PlayerID: 2,
+					Metal: 50000, Crystal: 30000, Gas: 15000,
+					Ships: map[string]int{"cargo": 20, "light_fighter": 10},
+				})
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -76,12 +108,26 @@ func TestSendProbe_DeductsProbe(t *testing.T) {
 	deductCalled := false
 	planetSvc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/internal/planet/coords":
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]int{"galaxy": 9, "system": 9, "position": 9})
 		case "/internal/ships/deduct":
 			deductCalled = true
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 		case "/internal/planet/info":
-			w.WriteHeader(http.StatusNotFound)
+			var req struct {
+				Galaxy   int `json:"galaxy"`
+				System   int `json:"system"`
+				Position int `json:"position"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			if req.Galaxy == 9 {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]int{"player_id": 1})
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

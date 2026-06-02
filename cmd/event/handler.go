@@ -38,12 +38,18 @@ func (h *Handler) GetActiveEvents(w http.ResponseWriter, r *http.Request) {
 	if userIDStr != "" {
 		userID, err := strconv.Atoi(userIDStr)
 		if err == nil {
+			eventIDs := make([]int, len(events))
 			for i, e := range events {
-				participation, err := h.service.repo.GetParticipation(r.Context(), userID, e.ID)
-				if err == nil {
-					resp[i].Joined = true
-					resp[i].Completed = participation.Completed
-					resp[i].RewardsClaimed = participation.RewardsClaimed
+				eventIDs[i] = e.ID
+			}
+			participations, err := h.service.repo.GetPlayerParticipations(r.Context(), userID, eventIDs)
+			if err == nil {
+				for i, e := range events {
+					if p, ok := participations[e.ID]; ok {
+						resp[i].Joined = true
+						resp[i].Completed = p.Completed
+						resp[i].RewardsClaimed = p.RewardsClaimed
+					}
 				}
 			}
 		}
@@ -68,12 +74,18 @@ func (h *Handler) GetAllEvents(w http.ResponseWriter, r *http.Request) {
 	if userIDStr != "" {
 		userID, err := strconv.Atoi(userIDStr)
 		if err == nil {
+			eventIDs := make([]int, len(events))
 			for i, e := range events {
-				participation, err := h.service.repo.GetParticipation(r.Context(), userID, e.ID)
-				if err == nil {
-					resp[i].Joined = true
-					resp[i].Completed = participation.Completed
-					resp[i].RewardsClaimed = participation.RewardsClaimed
+				eventIDs[i] = e.ID
+			}
+			participations, err := h.service.repo.GetPlayerParticipations(r.Context(), userID, eventIDs)
+			if err == nil {
+				for i, e := range events {
+					if p, ok := participations[e.ID]; ok {
+						resp[i].Joined = true
+						resp[i].Completed = p.Completed
+						resp[i].RewardsClaimed = p.RewardsClaimed
+					}
 				}
 			}
 		}

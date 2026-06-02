@@ -22,6 +22,7 @@ type Repository interface {
 	AddDMTransaction(ctx context.Context, playerID, amount, balanceAfter int, reason string) error
 	ListDMTransactions(ctx context.Context, playerID, limit int) ([]DMTransaction, error)
 	HireCommander(ctx context.Context, playerID int, commanderType string, level int, expiresAt time.Time) (CommanderEntry, error)
+	DeleteCommander(ctx context.Context, playerID int, commanderType string) error
 	GetActiveCommanders(ctx context.Context, playerID int) ([]CommanderEntry, error)
 	GetCommander(ctx context.Context, playerID int, commanderType string) (*CommanderEntry, error)
 	ListAllCommanders(ctx context.Context, playerID int) ([]CommanderEntry, error)
@@ -157,9 +158,9 @@ func (r *PostgresRepository) ListPlayerExpeditions(ctx context.Context, playerID
 func (r *PostgresRepository) GetLastExpeditionTime(ctx context.Context, playerID int) (time.Time, error) {
 	var t time.Time
 	err := r.pool.QueryRow(ctx, `
-		SELECT created_at FROM nebula.expeditions
+		SELECT started_at FROM nebula.expeditions
 		WHERE player_id = $1
-		ORDER BY created_at DESC
+		ORDER BY started_at DESC
 		LIMIT 1
 	`, playerID).Scan(&t)
 	if err != nil {
@@ -211,6 +212,15 @@ func (r *PostgresRepository) AddDarkMatter(ctx context.Context, playerID, amount
 }
 
 func (r *PostgresRepository) SpendDarkMatter(ctx context.Context, playerID, amount int) error {
+	// Ensure the row exists for players who have never earned DM (balance defaults to 0).
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO nebula.player_dark_matter (player_id, balance)
+		VALUES ($1, 0)
+		ON CONFLICT (player_id) DO NOTHING
+	`, playerID)
+	if err != nil {
+		return fmt.Errorf("spend dm upsert: %w", err)
+	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE nebula.player_dark_matter
 		SET balance = balance - $2
@@ -273,6 +283,17 @@ func (r *PostgresRepository) HireCommander(ctx context.Context, playerID int, co
 	entry.Level = level
 	entry.ExpiresAt = expiresAt
 	return entry, nil
+}
+
+func (r *PostgresRepository) DeleteCommander(ctx context.Context, playerID int, commanderType string) error {
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM nebula.player_commanders
+		WHERE player_id = $1 AND commander_type = $2
+	`, playerID, commanderType)
+	if err != nil {
+		return fmt.Errorf("delete commander: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) GetActiveCommanders(ctx context.Context, playerID int) ([]CommanderEntry, error) {
@@ -938,6 +959,16 @@ func (m *mockRepo) HireCommander(ctx context.Context, playerID int, commanderTyp
 	}
 	m.commanders = append(m.commanders, entry)
 	return entry, nil
+}
+
+func (m *mockRepo) DeleteCommander(ctx context.Context, playerID int, commanderType string) error {
+	for i, c := range m.commanders {
+		if c.PlayerID == playerID && c.CommanderType == commanderType {
+			m.commanders = append(m.commanders[:i], m.commanders[i+1:]...)
+			return nil
+		}
+	}
+	return nil
 }
 
 func (m *mockRepo) GetActiveCommanders(ctx context.Context, playerID int) ([]CommanderEntry, error) {

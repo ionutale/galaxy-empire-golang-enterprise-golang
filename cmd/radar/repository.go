@@ -118,11 +118,16 @@ func (r *PostgresRepository) GetUnresolvedEvents(ctx context.Context, playerID i
 }
 
 func (r *PostgresRepository) ResolveEvent(ctx context.Context, eventID int) error {
-	_, err := r.pool.Exec(ctx, `
-		UPDATE radar.radar_events SET resolved = true WHERE id = $1
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE radar.radar_events
+		SET resolved = TRUE
+		WHERE id = $1 AND resolved = FALSE
 	`, eventID)
 	if err != nil {
 		return fmt.Errorf("resolve event: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("event already resolved")
 	}
 	return nil
 }

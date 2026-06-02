@@ -36,7 +36,7 @@ func setupTestRouter(h *Handler) http.Handler {
 }
 
 func TestStartExpedition_NoAuth(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("POST", "/api/nebula/start", nil)
@@ -49,7 +49,7 @@ func TestStartExpedition_NoAuth(t *testing.T) {
 }
 
 func TestStartExpedition_InvalidAuth(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("POST", "/api/nebula/start", nil)
@@ -63,7 +63,7 @@ func TestStartExpedition_InvalidAuth(t *testing.T) {
 }
 
 func TestStartExpedition_MissingPlanetID(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"ships":{"light_fighter":10}}`))
@@ -78,7 +78,7 @@ func TestStartExpedition_MissingPlanetID(t *testing.T) {
 }
 
 func TestStartExpedition_InvalidJSON(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`not json`))
@@ -93,7 +93,7 @@ func TestStartExpedition_InvalidJSON(t *testing.T) {
 }
 
 func TestListExpeditions_NoAuth(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("GET", "/api/nebula/expeditions", nil)
@@ -106,7 +106,7 @@ func TestListExpeditions_NoAuth(t *testing.T) {
 }
 
 func TestListExpeditions_Empty(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("GET", "/api/nebula/expeditions", nil)
@@ -128,7 +128,7 @@ func TestListExpeditions_Empty(t *testing.T) {
 }
 
 func TestGetExpedition_NoAuth(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("GET", "/api/nebula/expeditions/1", nil)
@@ -141,7 +141,7 @@ func TestGetExpedition_NoAuth(t *testing.T) {
 }
 
 func TestDMBalance_NoAuth(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("POST", "/api/nebula/dm-balance", nil)
@@ -154,7 +154,7 @@ func TestDMBalance_NoAuth(t *testing.T) {
 }
 
 func TestDMBalance_Success(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("POST", "/api/nebula/dm-balance", nil)
@@ -179,7 +179,7 @@ func TestDMBalance_Success(t *testing.T) {
 }
 
 func TestDMSpend_NoAuth(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"amount":10,"reason":"test"}`))
@@ -193,7 +193,7 @@ func TestDMSpend_NoAuth(t *testing.T) {
 }
 
 func TestDMSpend_InvalidAmount(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"amount":-5,"reason":"test"}`))
@@ -210,7 +210,7 @@ func TestDMSpend_InvalidAmount(t *testing.T) {
 func TestDMSpend_Success(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"amount":30,"reason":"test spend"}`))
@@ -235,7 +235,7 @@ func TestDMSpend_Success(t *testing.T) {
 func TestDMSpend_Insufficient(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 10)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"amount":20,"reason":"too much"}`))
@@ -250,7 +250,7 @@ func TestDMSpend_Insufficient(t *testing.T) {
 }
 
 func TestDMSpeedUp_NoAuth(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"target_type":"research","target_id":1,"seconds_remaining":900}`))
@@ -263,9 +263,15 @@ func TestDMSpeedUp_NoAuth(t *testing.T) {
 }
 
 func TestDMSpeedUp_Success(t *testing.T) {
+	mockBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer mockBackend.Close()
+
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, mockBackend.URL, mockBackend.URL)
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"target_type":"research","target_id":1,"seconds_remaining":900}`))
@@ -290,7 +296,7 @@ func TestDMSpeedUp_Success(t *testing.T) {
 
 func TestDMSpeedUp_InsufficientDM(t *testing.T) {
 	repo := newMockRepo()
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"target_type":"research","target_id":1,"seconds_remaining":900}`))
@@ -306,7 +312,7 @@ func TestDMSpeedUp_InsufficientDM(t *testing.T) {
 func TestDMSpeedUp_InvalidTargetType(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"target_type":"invalid","target_id":1,"seconds_remaining":900}`))
@@ -320,7 +326,7 @@ func TestDMSpeedUp_InvalidTargetType(t *testing.T) {
 }
 
 func TestDMEstimateCost_Success(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"seconds":1800}`))
@@ -341,7 +347,7 @@ func TestDMEstimateCost_Success(t *testing.T) {
 }
 
 func TestDMTransactions_NoAuth(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("GET", "/api/nebula/dm/transactions", nil)
@@ -357,7 +363,7 @@ func TestDMTransactions_Success(t *testing.T) {
 	repo.AddDarkMatter(context.Background(), 1, 100)
 	repo.SpendDarkMatter(context.Background(), 1, 30)
 	repo.AddDMTransaction(context.Background(), 1, -30, 70, "test")
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("GET", "/api/nebula/dm/transactions", nil)
@@ -380,7 +386,7 @@ func TestDMTransactions_Success(t *testing.T) {
 }
 
 func TestHireCommander_NoAuth(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"commander_type":"commander"}`))
@@ -395,7 +401,7 @@ func TestHireCommander_NoAuth(t *testing.T) {
 func TestHireCommander_Success(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"commander_type":"commander"}`))
@@ -424,7 +430,7 @@ func TestHireCommander_Success(t *testing.T) {
 func TestHireCommander_InvalidType(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	body := bytes.NewReader([]byte(`{"commander_type":"invalid_type"}`))
@@ -438,7 +444,7 @@ func TestHireCommander_InvalidType(t *testing.T) {
 }
 
 func TestListCommanders_NoAuth(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("GET", "/api/nebula/commanders", nil)
@@ -452,7 +458,7 @@ func TestListCommanders_NoAuth(t *testing.T) {
 func TestListCommanders_Success(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	// hire a commander first
@@ -485,7 +491,7 @@ func TestListCommanders_Success(t *testing.T) {
 }
 
 func TestAvailableCommanders(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("GET", "/api/nebula/commanders/available", nil)
@@ -506,7 +512,7 @@ func TestAvailableCommanders(t *testing.T) {
 func TestInternalActiveCommanders(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	// hire a commander
@@ -535,7 +541,7 @@ func TestInternalActiveCommanders(t *testing.T) {
 }
 
 func TestGetExpedition_NotFound(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	h := NewHandler(svc)
 	mux := setupTestRouter(h)
 	req := httptest.NewRequest("GET", "/api/nebula/expeditions/999", nil)

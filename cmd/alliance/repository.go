@@ -22,6 +22,7 @@ type Repository interface {
 	RemoveMember(ctx context.Context, playerID int) error
 	GetMember(ctx context.Context, playerID int) (*Member, error)
 	GetMembers(ctx context.Context, allianceID int) ([]Member, error)
+	CountMembers(ctx context.Context, allianceID int) (int, error)
 	UpdateMemberRole(ctx context.Context, allianceID, playerID int, role string) error
 	GetBank(ctx context.Context, allianceID int) (*Bank, error)
 	UpdateBank(ctx context.Context, allianceID int, metal, crystal, gas int) error
@@ -170,6 +171,17 @@ func (r *PostgresRepository) GetMembers(ctx context.Context, allianceID int) ([]
 	return members, rows.Err()
 }
 
+func (r *PostgresRepository) CountMembers(ctx context.Context, allianceID int) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM alliance.members WHERE alliance_id = $1
+	`, allianceID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count members: %w", err)
+	}
+	return count, nil
+}
+
 func (r *PostgresRepository) UpdateMemberRole(ctx context.Context, allianceID, playerID int, role string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE alliance.members
@@ -309,11 +321,18 @@ func (r *PostgresRepository) UpdatePlayerLastActive(ctx context.Context, playerI
 }
 
 func (r *PostgresRepository) ShareReport(ctx context.Context, allianceID, playerID, reportID int) error {
-	_, err := r.pool.Exec(ctx, `
+	ct, err := r.pool.Exec(ctx, `
 		INSERT INTO alliance.shared_reports (alliance_id, report_id, shared_by)
 		VALUES ($1, $2, $3)
+		ON CONFLICT (alliance_id, report_id) DO NOTHING
 	`, allianceID, reportID, playerID)
-	return err
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("report already shared")
+	}
+	return nil
 }
 
 func (r *PostgresRepository) GetSharedReports(ctx context.Context, allianceID int) ([]SharedReport, error) {
@@ -506,6 +525,19 @@ func (m *mockRepo) GetMembers(ctx context.Context, allianceID int) ([]Member, er
 	return result, nil
 }
 
+func (m *mockRepo) CountMembers(ctx context.Context, allianceID int) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	count := 0
+	for _, mb := range m.members {
+		if mb.AllianceID == allianceID {
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (m *mockRepo) UpdateMemberRole(ctx context.Context, allianceID, playerID int, role string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -665,6 +697,12 @@ func (m *mockRepo) UpdatePlayerLastActive(ctx context.Context, playerID int) err
 func (m *mockRepo) ShareReport(ctx context.Context, allianceID, playerID, reportID int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	for _, sr := range m.sharedReports {
+		if sr.AllianceID == allianceID && sr.ReportID == reportID {
+			return fmt.Errorf("report already shared")
+		}
+	}
 
 	m.sharedReports = append(m.sharedReports, SharedReport{
 		ID:         m.nextSharedRpt,

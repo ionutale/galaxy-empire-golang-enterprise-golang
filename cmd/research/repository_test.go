@@ -20,12 +20,13 @@ func newMockRepo() *mockRepo {
 	}
 }
 
-func (m *mockRepo) CreateResearch(_ context.Context, playerID int, techType string, targetLevel int, completesAt time.Time) (ResearchQueue, error) {
+func (m *mockRepo) CreateResearch(_ context.Context, playerID, planetID int, techType string, targetLevel int, completesAt time.Time) (ResearchQueue, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	q := ResearchQueue{
 		ID:          m.nextID,
 		PlayerID:    playerID,
+		PlanetID:    planetID,
 		TechType:    techType,
 		TargetLevel: targetLevel,
 		StartedAt:   time.Now(),
@@ -124,4 +125,8 @@ func (m *mockRepo) TryCompleteResearch(_ context.Context, id int) (bool, error) 
 		}
 	}
 	return false, nil
+}
+
+func (m *mockRepo) SpeedUpResearch(_ context.Context, playerID, seconds int) error {
+	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sync"
 	"time"
 )
 
@@ -84,7 +85,50 @@ func (s *ResearchService) ListTechs(ctx context.Context, playerID int) ([]TechWi
 	return techs, labLevel, nil
 }
 
+func (s *ResearchService) verifyPlanetOwner(ctx context.Context, playerID, planetID int) error {
+	// Step 1: get coords for the planet
+	coordsBody := fmt.Sprintf(`{"planet_id":%d}`, planetID)
+	coordsResp, err := s.httpPost(ctx, s.planetAddr+"/internal/planet/coords", coordsBody)
+	if err != nil {
+		return fmt.Errorf("get planet coords: %w", err)
+	}
+	var coords struct {
+		Galaxy   int `json:"galaxy"`
+		System   int `json:"system"`
+		Position int `json:"position"`
+	}
+	if err := parseJSON(coordsResp, &coords); err != nil {
+		return fmt.Errorf("parse planet coords: %w", err)
+	}
+
+	// Step 2: get planet info (includes player_id) by coords
+	infoBody := fmt.Sprintf(`{"galaxy":%d,"system":%d,"position":%d}`, coords.Galaxy, coords.System, coords.Position)
+	infoResp, err := s.httpPost(ctx, s.planetAddr+"/internal/planet/info", infoBody)
+	if err != nil {
+		return fmt.Errorf("get planet info: %w", err)
+	}
+	var info struct {
+		PlayerID int    `json:"player_id"`
+		Error    string `json:"error"`
+	}
+	if err := parseJSON(infoResp, &info); err != nil {
+		return fmt.Errorf("parse planet info: %w", err)
+	}
+	if info.Error != "" {
+		return fmt.Errorf("planet info: %s", info.Error)
+	}
+	if info.PlayerID != playerID {
+		return fmt.Errorf("planet does not belong to player")
+	}
+	return nil
+}
+
 func (s *ResearchService) StartResearch(ctx context.Context, playerID, planetID int, techType string) (StartResearchResponse, error) {
+	// Verify the planet belongs to this player
+	if err := s.verifyPlanetOwner(ctx, playerID, planetID); err != nil {
+		return StartResearchResponse{}, fmt.Errorf("planet ownership: %w", err)
+	}
+
 	cfg, ok := techConfig(techType)
 	if !ok {
 		return StartResearchResponse{}, ErrInvalidTech
@@ -93,6 +137,11 @@ func (s *ResearchService) StartResearch(ctx context.Context, playerID, planetID 
 	currentLevel, err := s.fetchTechLevel(ctx, playerID, techType)
 	if err != nil {
 		return StartResearchResponse{}, fmt.Errorf("get tech level: %w", err)
+	}
+
+	const maxTechLevel = 30
+	if currentLevel >= maxTechLevel {
+		return StartResearchResponse{}, fmt.Errorf("tech already at maximum level (%d)", maxTechLevel)
 	}
 
 	if err := s.checkPrerequisites(ctx, playerID, planetID, cfg.Prerequisites); err != nil {
@@ -239,15 +288,32 @@ func (s *ResearchService) fetchTechLevel(ctx context.Context, playerID int, tech
 }
 
 func (s *ResearchService) fetchTechLevels(ctx context.Context, playerID int) (map[string]int, error) {
-	levels := map[string]int{}
+	levels := make(map[string]int)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	errs := make(chan error, len(Techs))
+
 	for _, cfg := range Techs {
-		level, err := s.fetchTechLevel(ctx, playerID, cfg.Type)
-		if err != nil {
-			return nil, err
-		}
-		if level > 0 {
-			levels[cfg.Type] = level
-		}
+		cfg := cfg // capture
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			level, err := s.fetchTechLevel(ctx, playerID, cfg.Type)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if level > 0 {
+				mu.Lock()
+				levels[cfg.Type] = level
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	if err := <-errs; err != nil {
+		return nil, err
 	}
 	return levels, nil
 }

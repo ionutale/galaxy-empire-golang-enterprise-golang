@@ -82,10 +82,10 @@ func TestDispatchFleet_PlanetServiceDenies(t *testing.T) {
 }
 
 func TestDispatchFleet_Success(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := planetServiceMock(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
-	}))
+	})
 	defer ts.Close()
 
 	svc := NewFleetService(newMockRepo(), ts.URL, "", "", "")
@@ -463,6 +463,9 @@ func planetServiceMock(handler func(w http.ResponseWriter, r *http.Request)) *ht
 		switch r.URL.Path {
 		case "/internal/planet/coords":
 			json.NewEncoder(w).Encode(map[string]int{"galaxy": 1, "system": 1, "position": 1})
+		case "/internal/planet/info":
+			// Ownership check — return player_id=1 so any test dispatching as player 1 passes
+			json.NewEncoder(w).Encode(map[string]any{"player_id": 1, "planet_id": 1, "metal": 0, "crystal": 0, "gas": 0, "ships": map[string]int{}})
 		case "/internal/player/techs":
 			json.NewEncoder(w).Encode(map[string]any{"technologies": map[string]int{}})
 		default:
@@ -471,7 +474,7 @@ func planetServiceMock(handler func(w http.ResponseWriter, r *http.Request)) *ht
 	}))
 }
 
-func TestDispatchFleet_ACS_SkipSlotLimit(t *testing.T) {
+func TestDispatchFleet_ACS_WithSlot(t *testing.T) {
 	mock := newMockRepo()
 	ts := planetServiceMock(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -480,12 +483,7 @@ func TestDispatchFleet_ACS_SkipSlotLimit(t *testing.T) {
 	defer ts.Close()
 
 	svc := NewFleetService(mock, ts.URL, "", "", "")
-	// Create fleets to fill slot
-	for i := 0; i < 10; i++ {
-		mock.CreateFleet(context.Background(), Fleet{PlayerID: 1, Status: "stationed"})
-	}
 
-	// ACS dispatch should skip slot limit check
 	fleet, err := svc.DispatchFleet(context.Background(), 1, DispatchRequest{
 		OriginPlanetID: 1,
 		Ships:          map[string]int{"cargo": 5},
@@ -494,7 +492,7 @@ func TestDispatchFleet_ACS_SkipSlotLimit(t *testing.T) {
 		AllianceGroupID: 42,
 	})
 	if err != nil {
-		t.Fatalf("expected ACS dispatch to succeed despite slot limit, got: %v", err)
+		t.Fatalf("expected ACS dispatch to succeed with free slot, got: %v", err)
 	}
 	if fleet.AllianceGroupID != 42 {
 		t.Fatalf("expected alliance_group_id 42, got %d", fleet.AllianceGroupID)

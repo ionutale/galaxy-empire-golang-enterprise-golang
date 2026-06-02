@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 )
 
@@ -134,12 +135,21 @@ func (s *RankingService) RecalculateAll(ctx context.Context) error {
 		return fmt.Errorf("list all player ids: %w", err)
 	}
 
+	sem := make(chan struct{}, 10) // 10 concurrent workers
+	var wg sync.WaitGroup
 	for _, pid := range playerIDs {
-		if err := s.RecalculateForPlayer(ctx, pid); err != nil {
-			slog.Error("recalculate for player failed", "player_id", pid, "error", err)
-			continue
-		}
+		pid := pid
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if err := s.RecalculateForPlayer(ctx, pid); err != nil {
+				slog.Error("recalculate for player failed", "player_id", pid, "error", err)
+			}
+		}()
 	}
+	wg.Wait()
 
 	slog.Info("recalculated scores for all players", "count", len(playerIDs))
 	return nil

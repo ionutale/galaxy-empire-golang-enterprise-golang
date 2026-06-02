@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Repository interface {
 	CreateNotification(ctx context.Context, playerID int, category, title, message string) (Notification, error)
+	CreateBulkNotifications(ctx context.Context, notifications []Notification) error
 	ListNotifications(ctx context.Context, playerID int, unreadOnly bool, limit, offset int) ([]Notification, int, error)
 	UnreadCount(ctx context.Context, playerID int) (int, error)
 	MarkRead(ctx context.Context, id, playerID int) error
@@ -38,22 +40,41 @@ func (r *PostgresRepository) CreateNotification(ctx context.Context, playerID in
 	return n, nil
 }
 
+// CreateBulkNotifications inserts all notifications in a single statement for efficiency.
+// Callers (e.g. event triggers) that need to fan-out a notification to many players
+// should use this instead of looping over CreateNotification.
+func (r *PostgresRepository) CreateBulkNotifications(ctx context.Context, notifications []Notification) error {
+	if len(notifications) == 0 {
+		return nil
+	}
+
+	// Build a single multi-row INSERT: VALUES ($1,$2,$3,$4), ($5,$6,$7,$8), ...
+	placeholders := make([]string, len(notifications))
+	args := make([]any, 0, len(notifications)*4)
+	for i, n := range notifications {
+		base := i * 4
+		placeholders[i] = fmt.Sprintf("($%d, $%d, $%d, $%d)", base+1, base+2, base+3, base+4)
+		args = append(args, n.PlayerID, n.Category, n.Title, n.Message)
+	}
+
+	query := "INSERT INTO notification.notifications (player_id, category, title, message) VALUES " +
+		strings.Join(placeholders, ", ")
+
+	_, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("bulk create notifications: %w", err)
+	}
+	return nil
+}
+
 func (r *PostgresRepository) ListNotifications(ctx context.Context, playerID int, unreadOnly bool, limit, offset int) ([]Notification, int, error) {
 	if limit > 100 {
 		limit = 100
 	}
-	var total int
-	countQuery := "SELECT COUNT(*) FROM notification.notifications WHERE player_id = $1"
-	countArgs := []any{playerID}
-	if unreadOnly {
-		countQuery += " AND is_read = FALSE"
-	}
-	err := r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total)
-	if err != nil {
-		return nil, 0, fmt.Errorf("count notifications: %w", err)
-	}
 
-	query := "SELECT id, player_id, category, title, message, is_read, created_at FROM notification.notifications WHERE player_id = $1"
+	query := `SELECT id, player_id, category, title, message, is_read, created_at, COUNT(*) OVER() AS total
+		FROM notification.notifications
+		WHERE player_id = $1`
 	args := []any{playerID}
 	if unreadOnly {
 		query += " AND is_read = FALSE"
@@ -68,9 +89,10 @@ func (r *PostgresRepository) ListNotifications(ctx context.Context, playerID int
 	defer rows.Close()
 
 	var notifications []Notification
+	var total int
 	for rows.Next() {
 		var n Notification
-		if err := rows.Scan(&n.ID, &n.PlayerID, &n.Category, &n.Title, &n.Message, &n.IsRead, &n.CreatedAt); err != nil {
+		if err := rows.Scan(&n.ID, &n.PlayerID, &n.Category, &n.Title, &n.Message, &n.IsRead, &n.CreatedAt, &total); err != nil {
 			return nil, 0, fmt.Errorf("scan notification: %w", err)
 		}
 		notifications = append(notifications, n)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -74,11 +75,26 @@ func (r *PostgresRepository) GetReportByID(ctx context.Context, reportID int) (E
 		return EspionageReport{}, fmt.Errorf("get report: %w", err)
 	}
 
-	json.Unmarshal(resourcesJSON, &rep.Resources)
-	json.Unmarshal(fleetJSON, &rep.Fleet)
-	json.Unmarshal(defenseJSON, &rep.Defense)
-	json.Unmarshal(techJSON, &rep.Tech)
-	json.Unmarshal(reportDataJSON, &rep.ReportData)
+	if err := json.Unmarshal(resourcesJSON, &rep.Resources); err != nil {
+		slog.Error("espionage: unmarshal resources JSON", "report_id", reportID, "error", err)
+		rep.Resources = map[string]int{}
+	}
+	if err := json.Unmarshal(fleetJSON, &rep.Fleet); err != nil {
+		slog.Error("espionage: unmarshal fleet JSON", "report_id", reportID, "error", err)
+		rep.Fleet = map[string]int{}
+	}
+	if err := json.Unmarshal(defenseJSON, &rep.Defense); err != nil {
+		slog.Error("espionage: unmarshal defense JSON", "report_id", reportID, "error", err)
+		rep.Defense = map[string]int{}
+	}
+	if err := json.Unmarshal(techJSON, &rep.Tech); err != nil {
+		slog.Error("espionage: unmarshal tech JSON", "report_id", reportID, "error", err)
+		rep.Tech = map[string]int{}
+	}
+	if err := json.Unmarshal(reportDataJSON, &rep.ReportData); err != nil {
+		slog.Error("espionage: unmarshal report_data JSON", "report_id", reportID, "error", err)
+		rep.ReportData = map[string]any{}
+	}
 
 	return rep, nil
 }
@@ -108,11 +124,26 @@ func (r *PostgresRepository) ListReportsForPlayer(ctx context.Context, playerID 
 		); err != nil {
 			return nil, fmt.Errorf("scan report: %w", err)
 		}
-		json.Unmarshal(resourcesJSON, &rep.Resources)
-		json.Unmarshal(fleetJSON, &rep.Fleet)
-		json.Unmarshal(defenseJSON, &rep.Defense)
-		json.Unmarshal(techJSON, &rep.Tech)
-		json.Unmarshal(reportDataJSON, &rep.ReportData)
+		if err := json.Unmarshal(resourcesJSON, &rep.Resources); err != nil {
+			slog.Error("espionage: unmarshal resources JSON", "report_id", rep.ID, "error", err)
+			rep.Resources = map[string]int{}
+		}
+		if err := json.Unmarshal(fleetJSON, &rep.Fleet); err != nil {
+			slog.Error("espionage: unmarshal fleet JSON", "report_id", rep.ID, "error", err)
+			rep.Fleet = map[string]int{}
+		}
+		if err := json.Unmarshal(defenseJSON, &rep.Defense); err != nil {
+			slog.Error("espionage: unmarshal defense JSON", "report_id", rep.ID, "error", err)
+			rep.Defense = map[string]int{}
+		}
+		if err := json.Unmarshal(techJSON, &rep.Tech); err != nil {
+			slog.Error("espionage: unmarshal tech JSON", "report_id", rep.ID, "error", err)
+			rep.Tech = map[string]int{}
+		}
+		if err := json.Unmarshal(reportDataJSON, &rep.ReportData); err != nil {
+			slog.Error("espionage: unmarshal report_data JSON", "report_id", rep.ID, "error", err)
+			rep.ReportData = map[string]any{}
+		}
 		reports = append(reports, rep)
 	}
 	return reports, rows.Err()

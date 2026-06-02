@@ -149,8 +149,14 @@ func generateOutcome(ships map[string]int, espionageTechLevel int) ExpeditionOut
 	piratesProb := 10
 	aliensProb := 10
 	nothingProb := 30 - espionageTechLevel*1
+	if nothingProb < 0 {
+		nothingProb = 0
+	}
 
 	total := resourcesProb + shipsProb + darkMatterProb + piratesProb + aliensProb + nothingProb
+	if total <= 0 {
+		return ExpeditionOutcome{Outcome: "nothing"}
+	}
 	roll := rand.Intn(total)
 
 	switch {
@@ -509,16 +515,16 @@ func (s *NebulaService) HireCommander(ctx context.Context, playerID int, command
 		}
 	}
 	expiresAt := time.Now().AddDate(0, 0, config.Duration)
-	if _, err := s.SpendDarkMatter(ctx, playerID, config.DMCost, "hire_"+commanderType); err != nil {
-		return CommanderEntry{}, err
-	}
 	entry, err := s.repo.HireCommander(ctx, playerID, commanderType, 1, expiresAt)
 	if err != nil {
-		// Refund the DM since the hire failed
-		if refundErr := s.repo.AddDarkMatter(ctx, playerID, config.DMCost); refundErr != nil {
-			slog.Error("failed to refund DM for commander hire failure", "error", refundErr)
-		}
 		return CommanderEntry{}, fmt.Errorf("hire commander: %w", err)
+	}
+	if _, err := s.SpendDarkMatter(ctx, playerID, config.DMCost, "hire_"+commanderType); err != nil {
+		// Rollback: delete the commander record we just inserted
+		if delErr := s.repo.DeleteCommander(ctx, playerID, commanderType); delErr != nil {
+			slog.Error("RECONCILIATION NEEDED: failed to delete commander after DM spend failure", "player_id", playerID, "commander_type", commanderType, "error", delErr)
+		}
+		return CommanderEntry{}, err
 	}
 	entry.Name = config.Name
 	entry.Description = config.Description
@@ -591,11 +597,10 @@ func (s *NebulaService) ClaimDailyGift(ctx context.Context, playerID int) (Daily
 		}
 	}
 
-	if newStreakDay == 7 {
-		if err := s.repo.ResetDailyGiftStreak(ctx, playerID); err != nil {
-			slog.Error("reset daily gift streak after day 7", "error", err)
-		}
-	}
+	// The DB (ClaimDailyGift) already wraps streak_day back to 1 after day 7 on the
+	// NEXT claim, so we must NOT call ResetDailyGiftStreak here — doing so would zero
+	// the streak immediately after the day-7 reward is handed out, causing the player
+	// to receive two day-1 rewards in a row (off-by-one, #118).
 
 	return DailyGiftResult{
 		StreakDay:       newStreakDay,
@@ -783,7 +788,19 @@ func (s *NebulaService) RerollTask(ctx context.Context, playerID, taskID int) (D
 		return DailyTask{}, fmt.Errorf("no tasks for today")
 	}
 
-	if tasks[0].RerollsUsed >= 1 {
+	// Find the specific task being rerolled and check its own reroll budget,
+	// rather than blindly reading tasks[0] which may be a different task.
+	var targetTask *dailyTaskRow
+	for i := range tasks {
+		if tasks[i].ID == taskID {
+			targetTask = &tasks[i]
+			break
+		}
+	}
+	if targetTask == nil {
+		return DailyTask{}, fmt.Errorf("task not found")
+	}
+	if targetTask.RerollsUsed >= 1 {
 		return DailyTask{}, fmt.Errorf("no rerolls remaining for today")
 	}
 
@@ -924,20 +941,61 @@ func (s *NebulaService) BuyItem(ctx context.Context, playerID int, itemID string
 		return nil, fmt.Errorf("item not found: %s", itemID)
 	}
 
+	// Check balance before charging to give a clear error up front.
+	if item.Currency == "dm" {
+		bal, _, err := s.repo.GetDarkMatterBalance(ctx, playerID)
+		if err != nil {
+			return nil, fmt.Errorf("check dm balance: %w", err)
+		}
+		if bal < item.Cost {
+			return nil, fmt.Errorf("insufficient dark matter")
+		}
+	} else if item.Currency == "credits" {
+		bal, _, err := s.repo.GetCreditsBalance(ctx, playerID)
+		if err != nil {
+			return nil, fmt.Errorf("check credits balance: %w", err)
+		}
+		if bal < item.Cost {
+			return nil, fmt.Errorf("insufficient credits")
+		}
+	} else {
+		return nil, fmt.Errorf("unknown currency: %s", item.Currency)
+	}
+
+	// Charge the currency.
 	if item.Currency == "dm" {
 		if err := s.repo.SpendDarkMatter(ctx, playerID, item.Cost); err != nil {
 			return nil, fmt.Errorf("insufficient dark matter")
 		}
 		balance, _, _ := s.repo.GetDarkMatterBalance(ctx, playerID)
 		s.repo.AddDMTransaction(ctx, playerID, -item.Cost, balance, "store_"+itemID)
-	} else if item.Currency == "credits" {
+	} else {
 		if err := s.repo.SpendCredits(ctx, playerID, item.Cost); err != nil {
 			return nil, fmt.Errorf("insufficient credits")
 		}
 		balance, _, _ := s.repo.GetCreditsBalance(ctx, playerID)
 		s.repo.AddCreditsTransaction(ctx, playerID, -item.Cost, balance, "store_"+itemID)
-	} else {
-		return nil, fmt.Errorf("unknown currency: %s", item.Currency)
+	}
+
+	// refundCharge attempts to return the currency if reward application fails.
+	refundCharge := func(reason string) {
+		if item.Currency == "dm" {
+			if err := s.repo.AddDarkMatter(ctx, playerID, item.Cost); err != nil {
+				slog.Error("RECONCILIATION NEEDED: DM refund failed after reward failure",
+					"player_id", playerID, "item_id", itemID, "cost", item.Cost, "reason", reason, "error", err)
+				return
+			}
+			balance, _, _ := s.repo.GetDarkMatterBalance(ctx, playerID)
+			s.repo.AddDMTransaction(ctx, playerID, item.Cost, balance, "refund_store_"+itemID)
+		} else {
+			if err := s.repo.AddCredits(ctx, playerID, item.Cost); err != nil {
+				slog.Error("RECONCILIATION NEEDED: credits refund failed after reward failure",
+					"player_id", playerID, "item_id", itemID, "cost", item.Cost, "reason", reason, "error", err)
+				return
+			}
+			balance, _, _ := s.repo.GetCreditsBalance(ctx, playerID)
+			s.repo.AddCreditsTransaction(ctx, playerID, item.Cost, balance, "refund_store_"+itemID)
+		}
 	}
 
 	if err := s.repo.CreateStorePurchase(ctx, playerID, itemID, item.Cost, item.Currency); err != nil {
@@ -950,14 +1008,21 @@ func (s *NebulaService) BuyItem(ctx context.Context, playerID int, itemID string
 	case "shards":
 		if err := s.repo.AddGalactoniteShards(ctx, playerID, item.Subtype, item.Count); err != nil {
 			slog.Error("add shards failed", "error", err)
+			refundCharge("add shards failed")
 			return nil, fmt.Errorf("failed to grant shards")
 		}
 		rewards["shards"] = item.Count
 
 	case "commander_extension":
-		for _, c := range Commanders {
-			if err := s.repo.ExtendCommanderDuration(ctx, playerID, c.Type, item.Count); err != nil {
-				slog.Error("extend commander duration failed", "commander", c.Type, "error", err)
+		// Only extend commanders that are currently active (expiry in the future).
+		activeCommanders, err := s.repo.GetActiveCommanders(ctx, playerID)
+		if err != nil {
+			refundCharge("get active commanders failed")
+			return nil, fmt.Errorf("failed to get active commanders")
+		}
+		for _, c := range activeCommanders {
+			if err := s.repo.ExtendCommanderDuration(ctx, playerID, c.CommanderType, item.Count); err != nil {
+				slog.Error("extend commander duration failed", "commander", c.CommanderType, "error", err)
 			}
 		}
 		rewards["extension_days"] = item.Count
@@ -965,9 +1030,11 @@ func (s *NebulaService) BuyItem(ctx context.Context, playerID int, itemID string
 	case "planet_shifter":
 		uses, err := s.repo.GetPlayerShifterUses(ctx, playerID)
 		if err != nil {
+			refundCharge("get shifter uses failed")
 			return nil, fmt.Errorf("failed to get shifter uses")
 		}
 		if err := s.repo.SetPlayerShifterUses(ctx, playerID, uses+item.Count); err != nil {
+			refundCharge("set shifter uses failed")
 			return nil, fmt.Errorf("failed to grant shifter uses")
 		}
 		rewards["shifter_uses"] = item.Count
@@ -975,6 +1042,7 @@ func (s *NebulaService) BuyItem(ctx context.Context, playerID int, itemID string
 	case "resources":
 		planetID, err := s.repo.GetPlayerPlanetID(ctx, playerID)
 		if err != nil {
+			refundCharge("get planet id failed")
 			return nil, fmt.Errorf("failed to get planet")
 		}
 		if err := s.addResourceToPlanet(ctx, planetID, "metal", item.Count); err != nil {
@@ -1023,10 +1091,15 @@ func (s *NebulaService) GetGalactoniteDiscovererLevel(ctx context.Context, playe
 	return s.repo.GetGalactoniteDiscovererLevel(ctx, playerID)
 }
 
+const maxDiscovererLevel = 10
+
 func (s *NebulaService) UpgradeGalactoniteDiscoverer(ctx context.Context, playerID int) (int, error) {
 	currentLevel, err := s.repo.GetGalactoniteDiscovererLevel(ctx, playerID)
 	if err != nil {
 		return 0, err
+	}
+	if currentLevel >= maxDiscovererLevel {
+		return 0, fmt.Errorf("discoverer already at maximum level (%d)", maxDiscovererLevel)
 	}
 	cost := (currentLevel + 1) * 100
 	if _, err := s.SpendDarkMatter(ctx, playerID, cost, "upgrade_discoverer"); err != nil {

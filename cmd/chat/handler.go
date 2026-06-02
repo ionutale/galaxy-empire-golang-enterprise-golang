@@ -60,8 +60,19 @@ func (h *ChatHandler) Messages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	beforeID, _ := strconv.Atoi(r.URL.Query().Get("before_id"))
+	limitStr := r.URL.Query().Get("limit")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	beforeIDStr := r.URL.Query().Get("before_id")
+	beforeID, err := strconv.Atoi(beforeIDStr)
+	if err != nil || beforeID < 0 {
+		beforeID = 0
+	}
 
 	messages, hasMore, err := h.service.GetMessages(r.Context(), playerID, channel, limit, beforeID)
 	if err != nil {
@@ -77,6 +88,12 @@ func (h *ChatHandler) Messages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Error("chat SSE goroutine panic", "recover", rec)
+		}
+	}()
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -165,10 +182,21 @@ func (h *ChatHandler) Inbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	beforeID, _ := strconv.Atoi(r.URL.Query().Get("before_id"))
+	inboxLimitStr := r.URL.Query().Get("limit")
+	inboxLimit, err := strconv.Atoi(inboxLimitStr)
+	if err != nil || inboxLimit <= 0 {
+		inboxLimit = 50
+	}
+	if inboxLimit > 200 {
+		inboxLimit = 200
+	}
+	inboxBeforeIDStr := r.URL.Query().Get("before_id")
+	inboxBeforeID, err := strconv.Atoi(inboxBeforeIDStr)
+	if err != nil || inboxBeforeID < 0 {
+		inboxBeforeID = 0
+	}
 
-	messages, hasMore, err := h.service.GetInbox(r.Context(), playerID, limit, beforeID)
+	messages, hasMore, err := h.service.GetInbox(r.Context(), playerID, inboxLimit, inboxBeforeID)
 	if err != nil {
 		slog.Error("get inbox failed", "error", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -188,10 +216,21 @@ func (h *ChatHandler) Outbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	beforeID, _ := strconv.Atoi(r.URL.Query().Get("before_id"))
+	outboxLimitStr := r.URL.Query().Get("limit")
+	outboxLimit, err := strconv.Atoi(outboxLimitStr)
+	if err != nil || outboxLimit <= 0 {
+		outboxLimit = 50
+	}
+	if outboxLimit > 200 {
+		outboxLimit = 200
+	}
+	outboxBeforeIDStr := r.URL.Query().Get("before_id")
+	outboxBeforeID, err := strconv.Atoi(outboxBeforeIDStr)
+	if err != nil || outboxBeforeID < 0 {
+		outboxBeforeID = 0
+	}
 
-	messages, hasMore, err := h.service.GetOutbox(r.Context(), playerID, limit, beforeID)
+	messages, hasMore, err := h.service.GetOutbox(r.Context(), playerID, outboxLimit, outboxBeforeID)
 	if err != nil {
 		slog.Error("get outbox failed", "error", err)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

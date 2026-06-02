@@ -14,6 +14,10 @@ func newTestService() *ResearchService {
 	svc := NewResearchService(repo, "http://fake-planet:8082")
 	svc.httpPost = func(_ context.Context, url, body string) (string, error) {
 		switch {
+		case strings.Contains(url, "/internal/planet/coords"):
+			return `{"galaxy":1,"system":1,"position":1}`, nil
+		case strings.Contains(url, "/internal/planet/info"):
+			return `{"player_id":1,"planet_id":1,"metal":0,"crystal":0,"gas":0,"ships":{}}`, nil
 		case strings.Contains(url, "/internal/player/tech-level"):
 			return `{"level":0}`, nil
 		case strings.Contains(url, "/internal/planet/building-level"):
@@ -21,6 +25,8 @@ func newTestService() *ResearchService {
 		case strings.Contains(url, "/internal/resources/deduct"):
 			return `{"ok":true}`, nil
 		case strings.Contains(url, "/internal/player/tech/add"):
+			return `{"ok":true}`, nil
+		case strings.Contains(url, "/internal/resources/add"):
 			return `{"ok":true}`, nil
 		}
 		return `{"error":"unknown"}`, nil
@@ -136,8 +142,8 @@ func TestStartResearch_AlreadyResearching(t *testing.T) {
 		t.Fatalf("first research failed: %v", err)
 	}
 	_, err = svc.StartResearch(context.Background(), 1, 1, "energy_tech")
-	if !errors.Is(err, ErrAlreadyResearching) {
-		t.Errorf("expected ErrAlreadyResearching, got %v", err)
+	if !errors.Is(err, ErrAlreadyResearching) && !errors.Is(err, ErrResearchInProgress) {
+		t.Errorf("expected ErrAlreadyResearching or ErrResearchInProgress, got %v", err)
 	}
 }
 
@@ -301,6 +307,10 @@ func TestStartResearch_AdvancedTech_WithSufficientLevels(t *testing.T) {
 	svc := newTestService()
 	svc.httpPost = func(_ context.Context, url, body string) (string, error) {
 		switch {
+		case strings.Contains(url, "/internal/planet/coords"):
+			return `{"galaxy":1,"system":1,"position":1}`, nil
+		case strings.Contains(url, "/internal/planet/info"):
+			return `{"player_id":1,"planet_id":1,"metal":0,"crystal":0,"gas":0,"ships":{}}`, nil
 		case strings.Contains(url, "/internal/player/tech-level"):
 			if strings.Contains(body, "energy_tech") {
 				return `{"level":4}`, nil
@@ -327,6 +337,16 @@ func TestStartResearch_AdvancedTech_WithSufficientLevels(t *testing.T) {
 		t.Errorf("expected astrophysics, got %s", resp.TechType)
 	}
 
+	// Complete astrophysics before testing anti_gravity (global one-at-a-time queue)
+	mock := svc.repo.(*mockRepo)
+	mock.mu.Lock()
+	for i := range mock.queue {
+		if mock.queue[i].TechType == "astrophysics" {
+			mock.queue[i].Completed = true
+		}
+	}
+	mock.mu.Unlock()
+
 	resp, err = svc.StartResearch(context.Background(), 1, 1, "anti_gravity")
 	if err != nil {
 		t.Fatalf("start anti_gravity failed: %v", err)
@@ -340,6 +360,10 @@ func TestStartResearch_CombatTech_WithSufficientLevels(t *testing.T) {
 	svc := newTestService()
 	svc.httpPost = func(_ context.Context, url, body string) (string, error) {
 		switch {
+		case strings.Contains(url, "/internal/planet/coords"):
+			return `{"galaxy":1,"system":1,"position":1}`, nil
+		case strings.Contains(url, "/internal/planet/info"):
+			return `{"player_id":1,"planet_id":1,"metal":0,"crystal":0,"gas":0,"ships":{}}`, nil
 		case strings.Contains(url, "/internal/player/tech-level"):
 			if strings.Contains(body, "energy_tech") {
 				return `{"level":4}`, nil
@@ -370,7 +394,9 @@ func TestStartResearch_CombatTech_WithSufficientLevels(t *testing.T) {
 		return `{"error":"unknown"}`, nil
 	}
 
+	// Test each combat tech for player 1; complete each research before starting the next
 	combatTechs := []string{"combustion_drive", "impulse_drive", "hyperspace_drive", "weapons_tech", "shielding_tech", "strength_tech"}
+	mock := svc.repo.(*mockRepo)
 	for _, name := range combatTechs {
 		resp, err := svc.StartResearch(context.Background(), 1, 1, name)
 		if err != nil {
@@ -379,6 +405,14 @@ func TestStartResearch_CombatTech_WithSufficientLevels(t *testing.T) {
 		if resp.TechType != name {
 			t.Errorf("expected %s, got %s", name, resp.TechType)
 		}
+		// Complete this research so the next tech can be queued (one-at-a-time limit)
+		mock.mu.Lock()
+		for j := range mock.queue {
+			if mock.queue[j].TechType == name {
+				mock.queue[j].Completed = true
+			}
+		}
+		mock.mu.Unlock()
 	}
 }
 

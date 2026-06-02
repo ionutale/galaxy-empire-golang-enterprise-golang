@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -43,8 +44,11 @@ func (h *Handler) Probe(w http.ResponseWriter, r *http.Request) {
 	report, err := h.service.SendProbe(r.Context(), userID, req)
 	if err != nil {
 		slog.Error("send probe failed", "error", err)
-		code := http.StatusBadRequest
-		writeJSON(w, code, map[string]string{"error": err.Error()})
+		if strings.Contains(err.Error(), "unreachable") || strings.Contains(err.Error(), "planet service") {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "service temporarily unavailable"})
+		} else {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
 		return
 	}
 
@@ -130,8 +134,7 @@ func (h *Handler) DeleteReport(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.service.DeleteReport(r.Context(), userID, reportID); err != nil {
 		slog.Error("delete report failed", "error", err)
-		code := http.StatusNotFound
-		writeJSON(w, code, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "report not found"})
 		return
 	}
 

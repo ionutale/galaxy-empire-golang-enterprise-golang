@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -86,12 +87,29 @@ func (s *NotificationService) CreateNotification(ctx context.Context, playerID i
 	return n, nil
 }
 
+// CreateBulk creates multiple notifications in a single DB call and publishes
+// each one to the SSE hub so connected clients receive real-time updates.
+func (s *NotificationService) CreateBulk(ctx context.Context, notifications []Notification) error {
+	if err := s.repo.CreateBulkNotifications(ctx, notifications); err != nil {
+		return err
+	}
+	for _, n := range notifications {
+		s.hub.Publish(n)
+	}
+	return nil
+}
+
+const maxOffset = 10000
+
 func (s *NotificationService) ListNotifications(ctx context.Context, playerID int, unreadOnly bool, limit, offset int) ([]Notification, int, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
 	if offset < 0 {
 		offset = 0
+	}
+	if offset > maxOffset {
+		offset = maxOffset
 	}
 	return s.repo.ListNotifications(ctx, playerID, unreadOnly, limit, offset)
 }
@@ -138,6 +156,12 @@ type NotificationEvent struct {
 }
 
 func (s *NotificationService) Stream(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Error("notification SSE goroutine panic", "recover", rec)
+		}
+	}()
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -164,7 +188,11 @@ func (s *NotificationService) Stream(w http.ResponseWriter, r *http.Request) {
 		select {
 		case n := <-listener:
 			event := NotificationEvent{Type: "notification", Data: n}
-			data, _ := json.Marshal(event)
+			data, err := json.Marshal(event)
+			if err != nil {
+				slog.Error("marshal SSE event", "error", err)
+				continue
+			}
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 		case <-ticker.C:

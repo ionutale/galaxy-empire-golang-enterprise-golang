@@ -25,7 +25,53 @@ func NewEspionageService(repo Repository, planetBaseURL string) *EspionageServic
 	}
 }
 
+func (s *EspionageService) verifyPlanetOwner(ctx context.Context, planetID, playerID int) error {
+	body, _ := json.Marshal(map[string]int{"planet_id": planetID})
+	resp, err := s.httpClient.Post(s.planetBaseURL+"/internal/planet/coords", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("planet service: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("planet not found")
+	}
+	var coords struct {
+		Galaxy   int `json:"galaxy"`
+		System   int `json:"system"`
+		Position int `json:"position"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&coords); err != nil {
+		return fmt.Errorf("parse coords: %w", err)
+	}
+
+	body2, _ := json.Marshal(map[string]int{
+		"galaxy": coords.Galaxy, "system": coords.System, "position": coords.Position,
+	})
+	resp2, err := s.httpClient.Post(s.planetBaseURL+"/internal/planet/info", "application/json", bytes.NewReader(body2))
+	if err != nil {
+		return fmt.Errorf("planet service: %w", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		return fmt.Errorf("planet not found")
+	}
+	var info struct {
+		PlayerID int `json:"player_id"`
+	}
+	if err := json.NewDecoder(resp2.Body).Decode(&info); err != nil {
+		return fmt.Errorf("parse planet info: %w", err)
+	}
+	if info.PlayerID != playerID {
+		return fmt.Errorf("origin planet does not belong to you")
+	}
+	return nil
+}
+
 func (s *EspionageService) SendProbe(ctx context.Context, playerID int, req ProbeRequest) (EspionageReport, error) {
+	if err := s.verifyPlanetOwner(ctx, req.PlanetID, playerID); err != nil {
+		return EspionageReport{}, fmt.Errorf("origin planet: %w", err)
+	}
+
 	if err := s.deductProbe(ctx, req.PlanetID); err != nil {
 		return EspionageReport{}, fmt.Errorf("deduct probe: %w", err)
 	}

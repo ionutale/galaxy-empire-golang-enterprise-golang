@@ -2,9 +2,21 @@ package main
 
 import "time"
 
+// UserSearchResult is the full record used internally by the repository.
 type UserSearchResult struct {
 	ID        int       `json:"id"`
 	Email     string    `json:"email"`
+	Username  string    `json:"username"`
+	IsBanned  bool      `json:"is_banned"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// UserSearchResponse is the sanitized shape returned to admin API callers.
+// It omits email and any other sensitive fields.
+type UserSearchResponse struct {
+	ID        int       `json:"id"`
+	Username  string    `json:"username"`
+	IsBanned  bool      `json:"is_banned"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

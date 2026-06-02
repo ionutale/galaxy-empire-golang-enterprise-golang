@@ -96,7 +96,7 @@ func TestGetEvents_ReturnsAll(t *testing.T) {
 	})
 	repo.ResolveEvent(context.Background(), e.ID)
 
-	events, err := svc.GetEvents(context.Background(), 1)
+	events, err := svc.GetEvents(context.Background(), 1, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestDetectFleet_CreatesEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, _ := svc.GetEvents(context.Background(), 1)
+	events, _ := svc.GetEvents(context.Background(), 1, "")
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
@@ -284,7 +284,7 @@ func TestDetectFleet_EspionageMission(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	events, _ := svc.GetEvents(context.Background(), 1)
+	events, _ := svc.GetEvents(context.Background(), 1, "")
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}

@@ -93,6 +93,8 @@ func (s *AllianceService) CreateAlliance(ctx context.Context, playerID int, name
 	return alliance, nil
 }
 
+const maxAllianceMembers = 100
+
 func (s *AllianceService) ApplyToAlliance(ctx context.Context, playerID, allianceID int) (Member, error) {
 	alliance, err := s.repo.GetAlliance(ctx, allianceID)
 	if err != nil {
@@ -107,12 +109,20 @@ func (s *AllianceService) ApplyToAlliance(ctx context.Context, playerID, allianc
 		return Member{}, fmt.Errorf("you are already in an alliance")
 	}
 
+	count, err := s.repo.CountMembers(ctx, allianceID)
+	if err != nil {
+		return Member{}, fmt.Errorf("count members: %w", err)
+	}
+	if count >= maxAllianceMembers {
+		return Member{}, fmt.Errorf("alliance is full (max %d members)", maxAllianceMembers)
+	}
+
 	member, err := s.repo.AddMember(ctx, alliance.ID, playerID, "pending")
 	if err != nil {
 		return Member{}, fmt.Errorf("apply to alliance: %w", err)
 	}
 
-	if err := s.repo.AddAuditLog(ctx, alliance.ID, playerID, "member_joined", nil); err != nil {
+	if err := s.repo.AddAuditLog(ctx, alliance.ID, playerID, "member_applied", nil); err != nil {
 		slog.Error("audit log failed", "error", err)
 	}
 
@@ -146,6 +156,10 @@ func (s *AllianceService) LeaveAlliance(ctx context.Context, playerID int) error
 }
 
 func (s *AllianceService) TransferFounder(ctx context.Context, playerID, targetPlayerID int) error {
+	if playerID == targetPlayerID {
+		return fmt.Errorf("cannot transfer founder role to yourself")
+	}
+
 	member, err := s.repo.GetMember(ctx, playerID)
 	if err != nil {
 		return fmt.Errorf("check membership: %w", err)
@@ -374,7 +388,17 @@ func (s *AllianceService) deductResource(ctx context.Context, planetID int, reso
 	return nil
 }
 
+const maxBulletinTitleLen = 200
+const maxBulletinContentLen = 10000
+
 func (s *AllianceService) PostBulletin(ctx context.Context, playerID int, title, content string) (Bulletin, error) {
+	if len(title) > maxBulletinTitleLen {
+		return Bulletin{}, fmt.Errorf("title too long (max %d chars)", maxBulletinTitleLen)
+	}
+	if len(content) > maxBulletinContentLen {
+		return Bulletin{}, fmt.Errorf("content too long (max %d chars)", maxBulletinContentLen)
+	}
+
 	member, err := s.repo.GetMember(ctx, playerID)
 	if err != nil {
 		return Bulletin{}, fmt.Errorf("check membership: %w", err)
@@ -424,6 +448,12 @@ func (s *AllianceService) DeleteBulletin(ctx context.Context, bulletinID, player
 	}
 	if requesterMember == nil {
 		return fmt.Errorf("you are not in an alliance")
+	}
+
+	// Prevent cross-alliance deletion: the requester must be in the same
+	// alliance as the bulletin's author.
+	if requesterMember.AllianceID != authorMember.AllianceID {
+		return fmt.Errorf("you are not authorized to delete this bulletin")
 	}
 
 	isAuthor := requesterMember.PlayerID == authorMember.PlayerID

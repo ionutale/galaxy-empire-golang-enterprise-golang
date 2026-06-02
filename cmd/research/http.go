@@ -19,9 +19,10 @@ func httpPostRequest(ctx context.Context, url, body string) (*http.Request, erro
 	return req, nil
 }
 
+var sharedHTTPClient = &http.Client{Timeout: 10 * time.Second}
+
 func httpDo(req *http.Request) (string, error) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := sharedHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("http do: %w", err)
 	}

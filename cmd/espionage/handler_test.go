@@ -63,24 +63,38 @@ func TestProbe_PlanetServiceUnreachable(t *testing.T) {
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expected 400 from unreachable planet service, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadGateway {
+		t.Errorf("expected 502 from unreachable planet service, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
 func TestProbe_Success(t *testing.T) {
 	planetSvc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/internal/planet/coords":
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]int{"galaxy": 9, "system": 9, "position": 9})
 		case "/internal/ships/deduct":
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 		case "/internal/planet/info":
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(PlanetInfo{
-				PlanetID: 10, PlayerID: 2,
-				Metal: 10000, Crystal: 5000, Gas: 2000,
-				Ships: map[string]int{"cargo": 10, "light_fighter": 5},
-			})
+			var req struct {
+				Galaxy   int `json:"galaxy"`
+				System   int `json:"system"`
+				Position int `json:"position"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			if req.Galaxy == 9 {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]int{"player_id": 1})
+			} else {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(PlanetInfo{
+					PlanetID: 10, PlayerID: 2,
+					Metal: 10000, Crystal: 5000, Gas: 2000,
+					Ships: map[string]int{"cargo": 10, "light_fighter": 5},
+				})
+			}
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

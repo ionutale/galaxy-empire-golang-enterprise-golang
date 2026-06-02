@@ -12,6 +12,7 @@ import (
 
 type Repository interface {
 	AddFriend(ctx context.Context, playerID, friendID int) (Friendship, error)
+	AddFriendTx(ctx context.Context, playerID, friendID int) (Friendship, error)
 	AcceptFriend(ctx context.Context, playerID, friendID int) error
 	RemoveFriend(ctx context.Context, playerID, friendID int) error
 	GetFriends(ctx context.Context, playerID int) ([]Friendship, error)
@@ -39,6 +40,42 @@ func (r *PostgresRepository) AddFriend(ctx context.Context, playerID, friendID i
 		return Friendship{}, fmt.Errorf("add friend: %w", err)
 	}
 	return f, nil
+}
+
+func (r *PostgresRepository) AddFriendTx(ctx context.Context, playerID, friendID int) (Friendship, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return Friendship{}, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	const insertSQL = `
+		INSERT INTO friend.friendships (player_id, friend_id, status)
+		VALUES ($1, $2, 'pending')
+		RETURNING id, player_id, friend_id, status, created_at, updated_at
+	`
+
+	var f1 Friendship
+	err = tx.QueryRow(ctx, insertSQL, playerID, friendID).Scan(
+		&f1.ID, &f1.PlayerID, &f1.FriendID, &f1.Status, &f1.CreatedAt, &f1.UpdatedAt,
+	)
+	if err != nil {
+		return Friendship{}, fmt.Errorf("add friend: %w", err)
+	}
+
+	var f2 Friendship
+	err = tx.QueryRow(ctx, insertSQL, friendID, playerID).Scan(
+		&f2.ID, &f2.PlayerID, &f2.FriendID, &f2.Status, &f2.CreatedAt, &f2.UpdatedAt,
+	)
+	if err != nil {
+		return Friendship{}, fmt.Errorf("add reciprocal: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Friendship{}, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return f1, nil
 }
 
 func (r *PostgresRepository) AcceptFriend(ctx context.Context, playerID, friendID int) error {
@@ -144,6 +181,26 @@ func (m *mockRepo) AddFriend(ctx context.Context, playerID, friendID int) (Frien
 	m.nextID++
 	m.friendships = append(m.friendships, f)
 	return f, nil
+}
+
+func (m *mockRepo) AddFriendTx(ctx context.Context, playerID, friendID int) (Friendship, error) {
+	f1, err := m.AddFriend(ctx, playerID, friendID)
+	if err != nil {
+		return Friendship{}, err
+	}
+	if _, err := m.AddFriend(ctx, friendID, playerID); err != nil {
+		// roll back the first insert
+		m.mu.Lock()
+		for i, f := range m.friendships {
+			if f.ID == f1.ID {
+				m.friendships = append(m.friendships[:i], m.friendships[i+1:]...)
+				break
+			}
+		}
+		m.mu.Unlock()
+		return Friendship{}, err
+	}
+	return f1, nil
 }
 
 func (m *mockRepo) AcceptFriend(ctx context.Context, playerID, friendID int) error {

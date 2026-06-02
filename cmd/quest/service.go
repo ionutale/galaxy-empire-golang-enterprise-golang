@@ -190,14 +190,11 @@ func (s *QuestService) ClaimReward(ctx context.Context, playerID int, questID st
 		return nil, fmt.Errorf("quest %s is not completed (status: %s)", questID, pq.Status)
 	}
 
-	claimed, err := s.repo.HasClaimedQuest(ctx, playerID, questID)
-	if err != nil {
-		return nil, err
-	}
-	if claimed {
-		return nil, fmt.Errorf("quest %s already claimed", questID)
-	}
-
+	// ClaimPlayerQuest uses UPDATE ... WHERE status = 'completed', so it is
+	// atomic: concurrent calls both pass the status check above but only one
+	// will find a row to update (RowsAffected > 0). This eliminates the TOCTOU
+	// race that existed when HasClaimedQuest and ClaimPlayerQuest were two
+	// separate round-trips.
 	now := time.Now()
 	if err := s.repo.ClaimPlayerQuest(ctx, playerID, questID, now); err != nil {
 		return nil, fmt.Errorf("claim quest: %w", err)
@@ -336,13 +333,21 @@ func (s *QuestService) evaluateRequirement(ctx context.Context, playerID int, re
 		}
 		return count
 	case "alliance_join":
-		return 1
+		// Check whether the player is an active alliance member (role != pending/applicant).
+		count, err := s.repo.GetPlayerAllianceMembership(ctx, playerID)
+		if err != nil {
+			return 0
+		}
+		return count
 	case "alliance_donate":
-		return 1
+		// TODO: implement alliance donation tracking; return 0 until data is available.
+		return 0
 	case "attack_count":
-		return 1
+		// TODO: implement attack event tracking; return 0 until data is available.
+		return 0
 	case "commander_hired":
-		return 1
+		// TODO: implement commander hire tracking; return 0 until data is available.
+		return 0
 	default:
 		return 0
 	}

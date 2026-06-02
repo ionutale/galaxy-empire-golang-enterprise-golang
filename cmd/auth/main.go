@@ -22,6 +22,14 @@ func main() {
 	jwtKey := []byte(getEnv("JWT_SECRET", "dev-secret-change-in-production"))
 	internalSecret := getEnv("INTERNAL_SECRET", "internal-dev-secret")
 
+	if len(jwtKey) < 32 {
+		slog.Error("JWT_SECRET must be at least 32 characters")
+		os.Exit(1)
+	}
+	if internalSecret == "internal-dev-secret" {
+		slog.Warn("INTERNAL_SECRET is using the default dev value — change this in production")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -29,6 +30,12 @@ func (s *EventService) JoinEvent(ctx context.Context, playerID, eventID int) err
 	}
 	if event.Status != "active" {
 		return errEventNotActive
+	}
+	// Hard real-time check: the background ticker only fires every 60 s, so the
+	// cached status field may still read "active" for up to a minute after the
+	// event has truly ended.  Reject late joins immediately (#160).
+	if time.Now().After(event.EndsAt) {
+		return fmt.Errorf("event has already ended")
 	}
 	_, err = s.repo.GetParticipation(ctx, playerID, eventID)
 	if err == nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"time"
 )
@@ -69,9 +70,25 @@ func (s *FleetService) DispatchFleet(ctx context.Context, playerID int, req Disp
 		return Fleet{}, fmt.Errorf("no ships with positive speed")
 	}
 
+	if req.Mission == "stargate" {
+		hasLink, err := s.checkStarGateLink(ctx, req.OriginPlanetID, req.TargetGalaxy, req.TargetSystem, req.TargetPosition)
+		if err != nil {
+			return Fleet{}, fmt.Errorf("stargate check: %w", err)
+		}
+		if !hasLink {
+			return Fleet{}, fmt.Errorf("no stargate link to target coordinates")
+		}
+	}
+
 	originCoords, err := s.getPlanetCoords(ctx, req.OriginPlanetID)
 	if err != nil {
 		return Fleet{}, err
+	}
+
+	// Verify the origin planet belongs to the requesting player
+	ownerID, err := s.getTargetPlayerID(ctx, originCoords.galaxy, originCoords.system, originCoords.position)
+	if err == nil && ownerID != playerID {
+		return Fleet{}, fmt.Errorf("origin planet does not belong to you")
 	}
 
 	if err := s.deductShips(ctx, req.OriginPlanetID, req.Ships); err != nil {
@@ -95,6 +112,10 @@ func (s *FleetService) DispatchFleet(ctx context.Context, playerID int, req Disp
 		travelSeconds = 1
 	}
 	travelDuration := time.Duration(travelSeconds) * time.Second
+	const maxTravelDuration = 30 * 24 * time.Hour
+	if travelDuration > maxTravelDuration {
+		travelDuration = maxTravelDuration
+	}
 
 	var totalFuel int
 	for shipType, qty := range req.Ships {
@@ -107,7 +128,11 @@ func (s *FleetService) DispatchFleet(ctx context.Context, playerID int, req Disp
 		distanceFactor = 1
 	}
 	speedFactor := 1.0 + float64(100-req.SpeedPct)/100.0
-	fuelCost := int(float64(totalFuel) * distanceFactor * speedFactor)
+	fuelCostF := float64(totalFuel) * distanceFactor * speedFactor
+	if fuelCostF > float64(math.MaxInt32) {
+		fuelCostF = float64(math.MaxInt32)
+	}
+	fuelCost := int(fuelCostF)
 
 	if req.Mission != "stargate" {
 		if err := s.deductFuel(ctx, req.OriginPlanetID, fuelCost); err != nil {
@@ -713,7 +738,9 @@ func (s *FleetService) harvestDebris(ctx context.Context, fleetID int, fleetShip
 		toHarvest = cargoCapacity
 	}
 
-	harvestMetal := debris.Metal * toHarvest / totalAvailable
+	// Use int64 intermediate values to prevent integer overflow when Metal and
+	// toHarvest are both large numbers.
+	harvestMetal := int(int64(debris.Metal) * int64(toHarvest) / int64(totalAvailable))
 	harvestCrystal := toHarvest - harvestMetal
 
 	if harvestMetal > debris.Metal {

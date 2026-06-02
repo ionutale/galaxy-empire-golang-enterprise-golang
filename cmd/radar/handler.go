@@ -25,7 +25,7 @@ func (h *Handler) Scan(w http.ResponseWriter, r *http.Request) {
 	events, err := h.service.Scan(r.Context(), playerID)
 	if err != nil {
 		slog.Error("scan failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 
@@ -45,10 +45,10 @@ func (h *Handler) GetEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	events, err := h.service.GetEvents(r.Context(), playerID)
+	events, err := h.service.GetEvents(r.Context(), playerID, req.Scope)
 	if err != nil {
 		slog.Error("get events failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 
@@ -75,7 +75,7 @@ func (h *Handler) ResolveEvent(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.service.ResolveEvent(r.Context(), playerID, req.EventID); err != nil {
 		slog.Error("resolve event failed", "error", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not resolve event"})
 		return
 	}
 
@@ -92,7 +92,7 @@ func (h *Handler) PlanetStatus(w http.ResponseWriter, r *http.Request) {
 	statuses, err := h.service.PlanetStatus(r.Context(), playerID)
 	if err != nil {
 		slog.Error("planet status failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 
@@ -119,7 +119,7 @@ func (h *Handler) EUXScan(w http.ResponseWriter, r *http.Request) {
 	result, err := h.service.EUXScan(r.Context(), playerID, req.TargetGalaxy, req.TargetSystem, req.TargetPosition)
 	if err != nil {
 		slog.Error("eu-x scan failed", "error", err)
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scan failed"})
 		return
 	}
 
@@ -140,7 +140,7 @@ func (h *Handler) InternalDetect(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.service.DetectFleet(r.Context(), req); err != nil {
 		slog.Error("detect fleet failed", "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 

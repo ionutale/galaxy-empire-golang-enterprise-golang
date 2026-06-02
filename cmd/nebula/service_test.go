@@ -310,7 +310,7 @@ func TestCalculateSpeedUpCost(t *testing.T) {
 		{2700, 3},
 		{3600, 4},
 	}
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	for _, tt := range tests {
 		cost := svc.CalculateSpeedUpCost(tt.seconds)
 		if cost != tt.expected {
@@ -320,10 +320,16 @@ func TestCalculateSpeedUpCost(t *testing.T) {
 }
 
 func TestSpeedUp_DeductsDM(t *testing.T) {
+	planetSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer planetSrv.Close()
+
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
-	cost, saved, err := svc.SpeedUp(context.Background(), 1, 900)
+	svc := NewNebulaService(repo, planetSrv.URL, "http://localhost:8085")
+	cost, saved, err := svc.SpeedUp(context.Background(), 1, "building", 1, 900)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,8 +353,8 @@ func TestSpeedUp_DeductsDM(t *testing.T) {
 }
 
 func TestSpeedUp_InsufficientDM(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
-	_, _, err := svc.SpeedUp(context.Background(), 1, 900)
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
+	_, _, err := svc.SpeedUp(context.Background(), 1, "building", 1, 900)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -360,7 +366,7 @@ func TestSpeedUp_InsufficientDM(t *testing.T) {
 func TestSpendDarkMatter_LogsTransaction(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	balance, err := svc.SpendDarkMatter(context.Background(), 1, 30, "test_reason")
 	if err != nil {
 		t.Fatal(err)
@@ -386,7 +392,7 @@ func TestSpendDarkMatter_LogsTransaction(t *testing.T) {
 func TestHireCommander_Valid(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	entry, err := svc.HireCommander(context.Background(), 1, "commander")
 	if err != nil {
 		t.Fatal(err)
@@ -410,7 +416,7 @@ func TestHireCommander_Valid(t *testing.T) {
 }
 
 func TestServiceHireCommander_InvalidType(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	_, err := svc.HireCommander(context.Background(), 1, "nonexistent")
 	if err == nil || err.Error() != "unknown commander type: nonexistent" {
 		t.Errorf("expected unknown commander type error, got %v", err)
@@ -420,7 +426,7 @@ func TestServiceHireCommander_InvalidType(t *testing.T) {
 func TestHireCommander_InsufficientDM(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 10)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	_, err := svc.HireCommander(context.Background(), 1, "commander")
 	if err == nil || err.Error() != "insufficient dark matter" {
 		t.Errorf("expected insufficient dark matter error, got %v", err)
@@ -430,7 +436,7 @@ func TestHireCommander_InsufficientDM(t *testing.T) {
 func TestHireCommander_AlreadyHired(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	_, err := svc.HireCommander(context.Background(), 1, "commander")
 	if err != nil {
 		t.Fatal(err)
@@ -444,7 +450,7 @@ func TestHireCommander_AlreadyHired(t *testing.T) {
 func TestGetPlayerCommanders_ActiveOnly(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	svc.HireCommander(context.Background(), 1, "commander")
 	entries, err := svc.GetPlayerCommanders(context.Background(), 1)
 	if err != nil {
@@ -465,7 +471,7 @@ func TestGetPlayerCommanders_NoExpired(t *testing.T) {
 		HiredAt:       time.Now().AddDate(0, 0, -30),
 		ExpiresAt:     time.Now().AddDate(0, 0, -23),
 	})
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	entries, err := svc.GetPlayerCommanders(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
@@ -476,7 +482,7 @@ func TestGetPlayerCommanders_NoExpired(t *testing.T) {
 }
 
 func TestGetAvailableCommanders(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	commanders := svc.GetAvailableCommanders()
 	if len(commanders) != 6 {
 		t.Errorf("expected 6 commanders, got %d", len(commanders))
@@ -496,7 +502,7 @@ func TestGetAvailableCommanders(t *testing.T) {
 func TestServiceInternalActiveCommanders(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	svc.HireCommander(context.Background(), 1, "engineer")
 	entries, err := svc.GetActiveCommandersRaw(context.Background(), 1)
 	if err != nil {
@@ -513,7 +519,7 @@ func TestServiceInternalActiveCommanders(t *testing.T) {
 func TestGetPlayerCommanders_NamesAndDescriptionsSet(t *testing.T) {
 	repo := newMockRepo()
 	repo.AddDarkMatter(context.Background(), 1, 100)
-	svc := NewNebulaService(repo, "http://localhost:8082")
+	svc := NewNebulaService(repo, "http://localhost:8082", "http://localhost:8085")
 	svc.HireCommander(context.Background(), 1, "geologist")
 	entries, err := svc.GetPlayerCommanders(context.Background(), 1)
 	if err != nil {
@@ -531,7 +537,7 @@ func TestGetPlayerCommanders_NamesAndDescriptionsSet(t *testing.T) {
 }
 
 func TestStartExpedition_NoShips(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	_, err := svc.StartExpedition(context.Background(), 1, 1, map[string]int{})
 	if err == nil || !strings.Contains(err.Error(), "no ships") {
 		t.Fatalf("expected no ships error, got: %v", err)
@@ -539,7 +545,7 @@ func TestStartExpedition_NoShips(t *testing.T) {
 }
 
 func TestStartExpedition_UnknownShip(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:8082")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:8082", "http://localhost:8085")
 	_, err := svc.StartExpedition(context.Background(), 1, 1, map[string]int{"death_star": 1})
 	if err == nil || !strings.Contains(err.Error(), "unknown ship") {
 		t.Fatalf("expected unknown ship error, got: %v", err)
@@ -560,7 +566,7 @@ func TestStartExpedition_InsufficientShips(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	svc := NewNebulaService(newMockRepo(), ts.URL)
+	svc := NewNebulaService(newMockRepo(), ts.URL, "http://localhost:8085")
 	_, err := svc.StartExpedition(context.Background(), 1, 1, map[string]int{"light_fighter": 100, "cargo": 50})
 	if err == nil || !strings.Contains(err.Error(), "insufficient") {
 		t.Fatalf("expected insufficient ships error, got: %v", err)
@@ -568,7 +574,7 @@ func TestStartExpedition_InsufficientShips(t *testing.T) {
 }
 
 func TestStartExpedition_PlanetServiceUnreachable(t *testing.T) {
-	svc := NewNebulaService(newMockRepo(), "http://localhost:1")
+	svc := NewNebulaService(newMockRepo(), "http://localhost:1", "http://localhost:8085")
 	_, err := svc.StartExpedition(context.Background(), 1, 1, map[string]int{"light_fighter": 10})
 	if err == nil || !strings.Contains(err.Error(), "planet service") {
 		t.Fatalf("expected planet service error, got: %v", err)
@@ -584,7 +590,7 @@ func TestStartExpedition_Success(t *testing.T) {
 	})
 	defer ts.Close()
 
-	svc := NewNebulaService(newMockRepo(), ts.URL)
+	svc := NewNebulaService(newMockRepo(), ts.URL, "http://localhost:8085")
 	expedition, err := svc.StartExpedition(context.Background(), 1, 1, map[string]int{"light_fighter": 10})
 	if err != nil {
 		t.Fatal(err)
@@ -610,7 +616,7 @@ func TestStartExpedition_ReturnsShipsAfterExpedition(t *testing.T) {
 	})
 	defer ts.Close()
 
-	svc := NewNebulaService(newMockRepo(), ts.URL)
+	svc := NewNebulaService(newMockRepo(), ts.URL, "http://localhost:8085")
 	ships := map[string]int{"light_fighter": 10, "cargo": 5}
 	expedition, err := svc.StartExpedition(context.Background(), 1, 1, ships)
 	if err != nil {
@@ -638,7 +644,7 @@ func TestStartExpedition_RecordsOutcome(t *testing.T) {
 	})
 	defer ts.Close()
 
-	svc := NewNebulaService(newMockRepo(), ts.URL)
+	svc := NewNebulaService(newMockRepo(), ts.URL, "http://localhost:8085")
 	expedition, err := svc.StartExpedition(context.Background(), 1, 1, map[string]int{"recycler": 50})
 	if err != nil {
 		t.Fatal(err)

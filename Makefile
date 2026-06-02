@@ -1,4 +1,4 @@
-SERVICES := auth planet fleet combat espionage research nebula alliance chat event notification quest radar friend ranking gateway
+SERVICES := auth planet fleet combat espionage research nebula alliance chat event notification quest radar friend ranking gateway tutorial admin
 MIGRATE_CMD := migrate -path ./migrations -database
 
 .PHONY: all build test vet lint clean migrate-up migrate-down $(addprefix build-, $(SERVICES)) $(addprefix test-, $(SERVICES)) $(addprefix vet-, $(SERVICES)) $(addprefix migrate-up-, $(SERVICES)) $(addprefix migrate-down-, $(SERVICES))

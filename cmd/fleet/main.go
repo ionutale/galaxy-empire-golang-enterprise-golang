@@ -94,7 +94,7 @@ func main() {
 			select {
 			case <-ticker.C:
 				func() {
-					workerCtx, workerCancel := context.WithTimeout(context.Background(), 30*time.Second)
+					workerCtx, workerCancel := context.WithTimeout(ctx, 30*time.Second)
 					defer workerCancel()
 					fleets, err := repo.GetArrivedFleets(workerCtx)
 					if err != nil {
@@ -103,6 +103,11 @@ func main() {
 					}
 					for _, f := range fleets {
 						func() {
+							defer func() {
+								if r := recover(); r != nil {
+									slog.Error("travel worker: panic processing fleet", "fleet", f.ID, "recover", r)
+								}
+							}()
 							fleetCtx, fleetCancel := context.WithTimeout(workerCtx, 10*time.Second)
 							defer fleetCancel()
 							switch f.Mission {
@@ -370,6 +375,13 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			crystal INT NOT NULL DEFAULT 0,
 			UNIQUE(galaxy, system, position)
 		);
+	`); err != nil {
+		return err
+	}
+	if _, err := pool.Exec(ctx, `
+		CREATE INDEX IF NOT EXISTS idx_fleet_fleets_player_id ON fleet.fleets(player_id);
+		CREATE INDEX IF NOT EXISTS idx_fleet_fleets_status ON fleet.fleets(status);
+		CREATE INDEX IF NOT EXISTS idx_fleet_fleets_player_status ON fleet.fleets(player_id, status);
 	`); err != nil {
 		return err
 	}

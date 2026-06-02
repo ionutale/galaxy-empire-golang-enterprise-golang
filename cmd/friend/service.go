@@ -32,14 +32,9 @@ func (s *FriendService) SendRequest(ctx context.Context, playerID, friendID int)
 		return Friendship{}, fmt.Errorf("friendship already exists")
 	}
 
-	f1, err := s.repo.AddFriend(ctx, playerID, friendID)
+	f1, err := s.repo.AddFriendTx(ctx, playerID, friendID)
 	if err != nil {
 		return Friendship{}, fmt.Errorf("add friend: %w", err)
-	}
-
-	_, err = s.repo.AddFriend(ctx, friendID, playerID)
-	if err != nil {
-		return Friendship{}, fmt.Errorf("add reciprocal: %w", err)
 	}
 
 	return f1, nil

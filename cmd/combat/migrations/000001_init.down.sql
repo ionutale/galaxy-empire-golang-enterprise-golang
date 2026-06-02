@@ -1,7 +1,4 @@
-DROP TABLE IF EXISTS fleet.moons CASCADE;
-
-DROP TABLE IF EXISTS combat.combat_reports CASCADE;
-
+-- Fix: only drop combat-specific tables, never touch fleet schema
+DROP TABLE IF EXISTS combat.moon_coordinates;
+DROP TABLE IF EXISTS combat.combat_reports;
 DROP SCHEMA IF EXISTS combat CASCADE;
-
-DROP SCHEMA IF EXISTS fleet CASCADE;

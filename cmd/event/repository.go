@@ -19,6 +19,7 @@ type Repository interface {
 	GetEventsByStatus(ctx context.Context, status string) ([]Event, error)
 
 	GetParticipation(ctx context.Context, playerID, eventID int) (EventParticipation, error)
+	GetPlayerParticipations(ctx context.Context, playerID int, eventIDs []int) (map[int]EventParticipation, error)
 	JoinEvent(ctx context.Context, playerID, eventID int) (EventParticipation, error)
 	ClaimRewards(ctx context.Context, playerID, eventID int) error
 }
@@ -132,6 +133,35 @@ func (r *PostgresRepository) GetParticipation(ctx context.Context, playerID, eve
 		p.Progress = map[string]any{}
 	}
 	return p, nil
+}
+
+func (r *PostgresRepository) GetPlayerParticipations(ctx context.Context, playerID int, eventIDs []int) (map[int]EventParticipation, error) {
+	if len(eventIDs) == 0 {
+		return map[int]EventParticipation{}, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, player_id, event_id, progress, completed, rewards_claimed, joined_at
+		FROM event.event_participation
+		WHERE player_id = $1 AND event_id = ANY($2)
+	`, playerID, eventIDs)
+	if err != nil {
+		return nil, fmt.Errorf("get player participations: %w", err)
+	}
+	defer rows.Close()
+	result := make(map[int]EventParticipation)
+	for rows.Next() {
+		var p EventParticipation
+		var progress []byte
+		if err := rows.Scan(&p.ID, &p.PlayerID, &p.EventID, &progress, &p.Completed, &p.RewardsClaimed, &p.JoinedAt); err != nil {
+			return nil, fmt.Errorf("scan participation: %w", err)
+		}
+		json.Unmarshal(progress, &p.Progress)
+		if p.Progress == nil {
+			p.Progress = map[string]any{}
+		}
+		result[p.EventID] = p
+	}
+	return result, rows.Err()
 }
 
 func (r *PostgresRepository) JoinEvent(ctx context.Context, playerID, eventID int) (EventParticipation, error) {

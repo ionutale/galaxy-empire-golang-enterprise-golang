@@ -159,8 +159,8 @@ func TestHandler_ApplyToAlliance_Success(t *testing.T) {
 
 	var resp map[string]any
 	json.NewDecoder(w2.Body).Decode(&resp)
-	if resp["role"] != "member" {
-		t.Errorf("expected role member, got %v", resp["role"])
+	if resp["role"] != "pending" {
+		t.Errorf("expected role pending, got %v", resp["role"])
 	}
 }
 

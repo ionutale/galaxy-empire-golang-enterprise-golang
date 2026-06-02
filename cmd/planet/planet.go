@@ -36,6 +36,7 @@ var ErrNoFieldsAvailable = errors.New("no fields available for construction")
 var ErrNoActiveUpgrade = errors.New("no active upgrade for this building")
 var ErrAlreadyDeconstructing = errors.New("building already queued for deconstruction")
 var ErrBuildingNotFound = errors.New("building not found")
+var ErrBuildAlreadyInProgress = errors.New("build already in progress")
 var ErrPrerequisitesNotMet = errors.New("prerequisites not met")
 var ErrInvalidShip = errors.New("invalid ship type")
 var ErrInvalidDefense = errors.New("invalid defense type")
@@ -118,9 +119,19 @@ func (s *PlanetService) GetOrCreatePlanet(ctx context.Context, userID int) (Plan
 		}
 	}
 
+	// Use an atomic compare-and-update so concurrent requests each add only
+	// their own production delta rather than overwriting the absolute value.
+	// We pass the timestamp we read from the DB as the expected value; if
+	// another goroutine already advanced it, the WHERE clause won't match and
+	// we skip the write (the in-memory planet value is still consistent for
+	// this request's lifetime).
+	prevUpdatedAt := planet.ResourcesUpdatedAt
 	now := time.Now()
 	planet.ResourcesUpdatedAt = now
-	if err := s.repo.UpdateResources(ctx, planet.ID, planet.Metal, planet.Crystal, planet.Gas, now); err != nil {
+	if err := s.repo.UpdateResourcesAtomically(ctx, planet.ID,
+		planet.Metal, planet.Crystal, planet.Gas,
+		prevUpdatedAt, now,
+	); err != nil {
 		return Planet{}, nil, err
 	}
 
@@ -159,10 +170,16 @@ func (s *PlanetService) processCompletedBuilds(ctx context.Context, planetID int
 }
 
 func (s *PlanetService) handleDeconstructCompletion(ctx context.Context, planetID int, q QueueEntry) error {
-	metalCost, crystalCost, gasCost := buildingCostResources(q.BuildingType, q.TargetLevel)
-	refundMetal := metalCost / 2
-	refundCrystal := crystalCost / 2
-	refundGas := gasCost / 2
+	// q.TargetLevel is the level the building will be after deconstruction
+	// (i.e. currentLevel - 1). If q.TargetLevel == 0 the building was at
+	// level 1, which was seeded for free — no refund is owed.
+	var refundMetal, refundCrystal, refundGas int
+	if q.TargetLevel > 0 {
+		metalCost, crystalCost, gasCost := buildingCostResources(q.BuildingType, q.TargetLevel)
+		refundMetal = metalCost / 2
+		refundCrystal = crystalCost / 2
+		refundGas = gasCost / 2
+	}
 
 	var maxFields int
 	if q.BuildingType == "terraformer" {
@@ -1039,6 +1056,12 @@ func (s *PlanetService) GetMoonBuildings(ctx context.Context, galaxy, system, po
 	return buildings, maxFields, nil
 }
 
+func moonBuildingBuildDuration(buildingType string, currentLevel int, roboticsLevel int) time.Duration {
+	next := float64(currentLevel + 1)
+	seconds := 71.3 / float64(roboticsLevel+1) * math.Exp(0.406*next)
+	return time.Duration(seconds * float64(time.Second))
+}
+
 func (s *PlanetService) StartMoonBuildingUpgrade(ctx context.Context, userID, galaxy, system, position int, buildingType string) error {
 	moonExists, err := s.repo.MoonExists(ctx, galaxy, system, position)
 	if err != nil {
@@ -1046,6 +1069,15 @@ func (s *PlanetService) StartMoonBuildingUpgrade(ctx context.Context, userID, ga
 	}
 	if !moonExists {
 		return ErrMoonNotFound
+	}
+
+	// Prevent concurrent moon building upgrades for the same building
+	pending, err := s.repo.HasPendingMoonBuild(ctx, galaxy, system, position, buildingType)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return fmt.Errorf("moon building already upgrading: please wait")
 	}
 
 	currentLevel, err := s.repo.GetMoonBuildingLevel(ctx, galaxy, system, position, buildingType)
@@ -1128,6 +1160,15 @@ func (s *PlanetService) StartMoonBuildingUpgrade(ctx context.Context, userID, ga
 	}
 
 	if err := s.repo.UpdateResources(ctx, planet.ID, planet.Metal-metalCost, planet.Crystal-crystalCost, planet.Gas-gasCost, time.Now()); err != nil {
+		return err
+	}
+
+	roboticsLevel, _ := s.repo.GetMoonBuildingLevel(ctx, galaxy, system, position, "robotics_factory")
+	buildDuration := moonBuildingBuildDuration(buildingType, currentLevel, roboticsLevel)
+
+	// Set the build-in-progress cooldown before applying the upgrade so that
+	// concurrent requests are rejected even if UpdateMoonBuildingLevel is slow.
+	if err := s.repo.SetMoonBuildCooldown(ctx, galaxy, system, position, buildingType, buildDuration); err != nil {
 		return err
 	}
 

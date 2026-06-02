@@ -44,6 +44,10 @@ func (s *AuthService) Register(ctx context.Context, req RegisterRequest) (AuthRe
 	if len(req.Password) < 6 {
 		return AuthResponse{}, fmt.Errorf("%w: password must be at least 6 characters", ErrValidation)
 	}
+	const maxPasswordLen = 72
+	if len(req.Password) > maxPasswordLen {
+		return AuthResponse{}, fmt.Errorf("%w: password must be at most 72 characters", ErrValidation)
+	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -74,6 +78,10 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (AuthResponse
 		return AuthResponse{}, err
 	}
 
+	const maxPasswordLen = 72
+	if len(req.Password) > maxPasswordLen {
+		return AuthResponse{}, ErrInvalidCredentials
+	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		return AuthResponse{}, ErrInvalidCredentials
 	}

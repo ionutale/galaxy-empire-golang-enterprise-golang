@@ -23,6 +23,9 @@ type Repository interface {
 	GetPlayerDefenseCount(ctx context.Context, playerID int, defenseType string) (int, error)
 	GetTotalPlayerResources(ctx context.Context, playerID int) (int, error)
 	GetExpeditionCount(ctx context.Context, playerID int) (int, error)
+	// GetPlayerAllianceMembership returns 1 if the player has an active (non-pending)
+	// alliance membership, 0 otherwise.
+	GetPlayerAllianceMembership(ctx context.Context, playerID int) (int, error)
 	AddPlayerResources(ctx context.Context, playerID int, metal, crystal, gas int) error
 	AddDarkMatter(ctx context.Context, playerID int, amount int) error
 }
@@ -236,6 +239,22 @@ func (r *PostgresRepository) GetExpeditionCount(ctx context.Context, playerID in
 		return 0, nil
 	}
 	return count, nil
+}
+
+func (r *PostgresRepository) GetPlayerAllianceMembership(ctx context.Context, playerID int) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM alliance.members
+		 WHERE player_id = $1 AND role NOT IN ('pending', 'applicant')`,
+		playerID,
+	).Scan(&count)
+	if err != nil {
+		return 0, nil
+	}
+	if count > 0 {
+		return 1, nil
+	}
+	return 0, nil
 }
 
 func (r *PostgresRepository) AddPlayerResources(ctx context.Context, playerID int, metal, crystal, gas int) error {
